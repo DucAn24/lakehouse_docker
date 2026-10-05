@@ -1,0 +1,34 @@
+{
+  "name": "postgres-clickstream-cdc",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "plugin.name": "pgoutput",
+
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "123456",
+    "database.dbname": "orders",
+
+    "topic.prefix": "clickstream",
+
+    "table.include.list": "public.click_customers,public.click_products,public.click_sessions,public.click_orders,public.click_order_items,public.click_events,public.click_reviews",
+
+    "slot.name": "clickstream_slot",
+    "publication.name": "dbz_publication_clickstream",
+    "publication.autocreate.mode": "all_tables",
+
+    "snapshot.mode": "initial",
+    "snapshot.fetch.size": "20000",
+    "snapshot.max.threads": "8",
+
+    "max.batch.size": "2048",
+    "max.queue.size": "8192",
+
+    "decimal.handling.mode": "string",
+    "time.precision.mode": "connect",
+
+    "tombstones.on.delete": "false",
+    "heartbeat.interval.ms": "10000"
+  }
+}

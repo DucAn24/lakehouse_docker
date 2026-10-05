@@ -1,0 +1,777 @@
+{
+  "uid": "lakehouse-overview",
+  "title": "Lakehouse Overview",
+  "tags": [
+    "lakehouse",
+    "trino",
+    "gold"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Olist — Overview",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Customers",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT COUNT(*) AS customers FROM delta.gold.dim_customer"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Products",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT COUNT(DISTINCT product_id) AS products FROM delta.gold.dim_product"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Orders",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT COUNT(DISTINCT order_id) AS orders FROM delta.gold.fact_orders"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Total revenue (BRL)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT ROUND(SUM(total_item_value), 2) AS revenue FROM delta.gold.fact_orders"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyBRL",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Avg review score",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT ROUND(AVG(review_score), 2) AS avg_score FROM delta.gold.fact_reviews"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "min": 1,
+          "max": 5
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 7,
+      "type": "barchart",
+      "title": "Monthly revenue",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT d.year_month AS month, ROUND(SUM(f.total_item_value), 2) AS revenue\nFROM delta.gold.fact_orders f\nJOIN delta.gold.dim_date d ON f.date_sk = d.date_sk\nGROUP BY d.year_month\nORDER BY d.year_month"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "unit": "currencyBRL"
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "vertical",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        },
+        "showValue": "auto",
+        "xTickLabelRotation": -45
+      }
+    },
+    {
+      "id": 8,
+      "type": "barchart",
+      "title": "Revenue by state (top 10)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT c.customer_state AS state, ROUND(SUM(f.total_item_value), 2) AS revenue\nFROM delta.gold.fact_orders f\nJOIN delta.gold.dim_customer c ON f.customer_sk = c.customer_sk\nGROUP BY c.customer_state\nORDER BY revenue DESC\nLIMIT 10"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "unit": "currencyBRL"
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        },
+        "showValue": "auto"
+      }
+    },
+    {
+      "id": 9,
+      "type": "barchart",
+      "title": "Top categories by sales",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT p.product_category_name_english AS category, ROUND(SUM(f.unit_price), 2) AS total_sales\nFROM delta.gold.fact_orders f\nJOIN delta.gold.dim_product p ON f.product_sk = p.product_sk\nGROUP BY p.product_category_name_english\nORDER BY total_sales DESC\nLIMIT 10"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "unit": "currencyBRL"
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        },
+        "showValue": "auto"
+      }
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Reviews by category (top 10)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT p.product_category_name_english AS category,\n    COUNT(*) AS total_reviews,\n    ROUND(AVG(r.review_score), 2) AS avg_score,\n    ROUND(SUM(r.is_positive) * 100.0 / COUNT(*), 2) AS positive_rate_pct\nFROM delta.gold.fact_reviews r\nJOIN delta.gold.fact_orders f ON r.order_id = f.order_id\nJOIN delta.gold.dim_product p ON f.product_sk = p.product_sk\nGROUP BY p.product_category_name_english\nORDER BY total_reviews DESC\nLIMIT 10"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 11,
+      "type": "row",
+      "title": "Clickstream",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Sessions",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT COUNT(DISTINCT session_sk) AS sessions FROM delta.gold.fact_sessions"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Events",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 30,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT COUNT(*) AS events FROM delta.gold.fact_clickstream_events"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Orders",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 30,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT COUNT(DISTINCT order_id) AS orders FROM delta.gold.fact_click_orders"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Revenue (USD)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 30,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT ROUND(SUM(total_usd), 2) AS revenue FROM delta.gold.fact_click_orders"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 16,
+      "type": "barchart",
+      "title": "Conversion funnel (sessions per event type)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT event_type, COUNT(DISTINCT session_sk) AS unique_sessions\nFROM delta.gold.fact_clickstream_events\nGROUP BY event_type\nORDER BY unique_sessions DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        },
+        "showValue": "auto"
+      }
+    },
+    {
+      "id": 17,
+      "type": "barchart",
+      "title": "Revenue by device (USD)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 34,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT d.device, ROUND(SUM(o.total_usd), 2) AS revenue_usd\nFROM delta.gold.fact_click_orders o\nJOIN delta.gold.dim_device d ON o.device_sk = d.device_sk\nGROUP BY d.device\nORDER BY revenue_usd DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        },
+        "showValue": "auto"
+      }
+    },
+    {
+      "id": 18,
+      "type": "barchart",
+      "title": "Revenue by country (top 10, USD)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT c.country, ROUND(SUM(o.total_usd), 2) AS revenue_usd\nFROM delta.gold.fact_click_orders o\nJOIN delta.gold.dim_click_customer c ON o.customer_sk = c.customer_sk\nGROUP BY c.country\nORDER BY revenue_usd DESC\nLIMIT 10"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        },
+        "showValue": "auto"
+      }
+    },
+    {
+      "id": 19,
+      "type": "table",
+      "title": "Sessions by device & traffic source",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 42,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT d.device, ts.traffic_source,\n    COUNT(DISTINCT s.session_sk) AS total_sessions,\n    COUNT(e.event_sk) AS total_events,\n    ROUND(CAST(COUNT(e.event_sk) AS DOUBLE) / COUNT(DISTINCT s.session_sk), 2) AS avg_actions_per_session\nFROM delta.gold.fact_sessions s\nJOIN delta.gold.dim_device d ON s.device_sk = d.device_sk\nJOIN delta.gold.dim_traffic_source ts ON s.source_sk = ts.source_sk\nLEFT JOIN delta.gold.fact_clickstream_events e ON s.session_sk = e.session_sk\nGROUP BY d.device, ts.traffic_source\nORDER BY total_sessions DESC\nLIMIT 10"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    }
+  ]
+}

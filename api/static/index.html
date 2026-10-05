@@ -1,0 +1,1686 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Lakehouse Assistant</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-tertiary: #1a1a24;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border: #2a2a3a;
+            --user-bubble: #6366f1;
+            --assistant-bubble: #1e1e2e;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+            --sidebar-width: 280px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            width: var(--sidebar-width);
+            min-width: var(--sidebar-width);
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            transition: margin-left 0.3s ease;
+            z-index: 20;
+        }
+
+        .sidebar.collapsed {
+            margin-left: calc(-1 * var(--sidebar-width));
+        }
+
+        .sidebar-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .sidebar-header h2 {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .btn-new-chat {
+            width: 100%;
+            padding: 10px 14px;
+            margin: 12px 16px;
+            width: calc(100% - 32px);
+            background: var(--accent);
+            border: none;
+            border-radius: 10px;
+            color: white;
+            font-size: 13px;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .btn-new-chat:hover {
+            background: var(--accent-hover);
+            transform: translateY(-1px);
+        }
+
+        .history-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px 8px;
+        }
+
+        .history-list::-webkit-scrollbar { width: 4px; }
+        .history-list::-webkit-scrollbar-track { background: transparent; }
+        .history-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+        .history-item {
+            padding: 10px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            color: var(--text-secondary);
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            position: relative;
+            margin-bottom: 2px;
+        }
+
+        .history-item:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .history-item.active {
+            background: rgba(99, 102, 241, 0.12);
+            color: var(--accent-hover);
+        }
+
+        .history-item-icon {
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .history-item-text {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .history-item-actions {
+            display: none;
+            gap: 2px;
+            flex-shrink: 0;
+        }
+
+        .history-item:hover .history-item-actions {
+            display: flex;
+        }
+
+        .history-item-actions button {
+            width: 24px;
+            height: 24px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+        }
+
+        .history-item-actions button:hover {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        .history-item-actions button.btn-delete-item:hover {
+            color: var(--danger);
+        }
+
+        .sidebar-footer {
+            padding: 12px 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        .btn-clear-all {
+            width: 100%;
+            padding: 8px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-clear-all:hover {
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        .history-empty {
+            padding: 24px 16px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .history-date-group {
+            padding: 8px 12px 4px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* ── Main Area ── */
+        .main-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        /* Header */
+        .header {
+            padding: 16px 24px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn-toggle-sidebar {
+            width: 36px;
+            height: 36px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .btn-toggle-sidebar:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-color: var(--accent);
+        }
+
+        .logo {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--accent), #a855f7);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .header-info h1 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .header-info span {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--success);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--success);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .btn-reset {
+            padding: 8px 16px;
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+
+        .btn-reset:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-color: var(--accent);
+        }
+
+        /* Chat Area */
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            scroll-behavior: smooth;
+        }
+
+        .chat-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .chat-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .chat-container::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+
+        /* Messages */
+        .message {
+            display: flex;
+            gap: 12px;
+            max-width: 85%;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .message.assistant {
+            align-self: flex-start;
+        }
+
+        .avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+
+        .message.user .avatar {
+            background: var(--user-bubble);
+        }
+
+        .message.assistant .avatar {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+        }
+
+        .message-content {
+            padding: 14px 18px;
+            border-radius: 16px;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+
+        .message.user .message-content {
+            background: var(--user-bubble);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant .message-content {
+            background: var(--assistant-bubble);
+            color: var(--text-primary);
+            border-bottom-left-radius: 4px;
+            border: 1px solid var(--border);
+        }
+
+        .message-content pre {
+            background: var(--bg-primary);
+            padding: 12px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 8px 0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+        }
+
+        .message-content code {
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg-primary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        /* SQL Details Dropdown */
+        .sql-details {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin: 12px 0;
+            overflow: hidden;
+            transition: all 0.2s ease;
+        }
+
+        .sql-details[open] {
+            border-color: var(--accent);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.15);
+        }
+
+        .sql-details summary {
+            padding: 12px 16px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--accent-hover);
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            outline: none;
+            list-style: none;
+        }
+
+        .sql-details summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .sql-details summary:hover {
+            background: rgba(99, 102, 241, 0.08);
+            color: var(--text-primary);
+        }
+
+        .sql-details summary .sql-icon {
+            width: 16px;
+            height: 16px;
+            color: var(--accent);
+        }
+
+        .sql-details summary .chevron-icon {
+            width: 16px;
+            height: 16px;
+            margin-left: auto;
+            transition: transform 0.2s ease;
+            color: var(--text-muted);
+        }
+
+        .sql-details[open] summary .chevron-icon {
+            transform: rotate(180deg);
+            color: var(--accent);
+        }
+
+        .sql-details .sql-body {
+            padding: 4px 16px 16px;
+            border-top: 1px solid var(--border);
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .sql-details pre {
+            margin: 0 !important;
+            background: var(--bg-primary) !important;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        /* Markdown rendered elements inside message bubbles */
+        .message-content h1,
+        .message-content h2,
+        .message-content h3,
+        .message-content h4 {
+            margin: 10px 0 4px;
+            color: var(--text-primary);
+            font-weight: 700;
+            line-height: 1.3;
+        }
+        .message-content h1 { font-size: 17px; }
+        .message-content h2 { font-size: 15px; color: var(--accent-hover); }
+        .message-content h3 { font-size: 14px; }
+        .message-content h4 { font-size: 13px; }
+
+        .message-content hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 10px 0;
+        }
+
+        .message-content ul,
+        .message-content ol {
+            padding-left: 20px;
+            margin: 6px 0;
+        }
+        .message-content li {
+            margin: 3px 0;
+            line-height: 1.5;
+        }
+        .message-content li + li { margin-top: 2px; }
+
+        /* Premium Table Styles */
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+            margin: 16px 0;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        th {
+            background: rgba(99, 102, 241, 0.08);
+            color: var(--accent-hover);
+            font-weight: 600;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.05em;
+        }
+
+        td {
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            font-family: inherit;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:nth-child(even) td {
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        tr:hover td {
+            background: rgba(99, 102, 241, 0.04);
+            color: white;
+        }
+
+        /* Typing Indicator */
+        .typing-indicator {
+            display: flex;
+            gap: 4px;
+            padding: 14px 18px;
+            background: var(--assistant-bubble);
+            border-radius: 16px;
+            border-bottom-left-radius: 4px;
+            border: 1px solid var(--border);
+            width: fit-content;
+        }
+
+        .typing-indicator span {
+            width: 8px;
+            height: 8px;
+            background: var(--text-muted);
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-6px); }
+        }
+
+        /* Welcome Message */
+        .welcome {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+
+        .welcome h2 {
+            font-size: 24px;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .welcome p {
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+
+        .suggestions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+        }
+
+        .suggestion {
+            padding: 10px 16px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .suggestion:hover {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+
+        /* Input Area */
+        .input-container {
+            padding: 16px 24px 24px;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 8px;
+            transition: border-color 0.2s;
+        }
+
+        .input-wrapper:focus-within {
+            border-color: var(--accent);
+        }
+
+        #message-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-family: inherit;
+            padding: 8px 12px;
+            resize: none;
+            max-height: 120px;
+        }
+
+        #message-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .btn-send {
+            width: 44px;
+            height: 44px;
+            background: var(--accent);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .btn-send:hover:not(:disabled) {
+            background: var(--accent-hover);
+            transform: scale(1.05);
+        }
+
+        .btn-send:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-send svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Rename input inline */
+        .rename-input {
+            background: var(--bg-primary);
+            border: 1px solid var(--accent);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: inherit;
+            padding: 2px 6px;
+            width: 100%;
+            outline: none;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                z-index: 100;
+                box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
+            }
+            .sidebar.collapsed {
+                margin-left: calc(-1 * var(--sidebar-width));
+            }
+        }
+
+        @media (max-width: 640px) {
+            .header { padding: 12px 16px; }
+            .chat-container { padding: 16px; }
+            .input-container { padding: 12px 16px 20px; }
+            .message { max-width: 90%; }
+        }
+
+        /* ── Tab Bar ── */
+        .tab-bar {
+            display: flex;
+            gap: 2px;
+            padding: 0 20px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .tab-btn {
+            padding: 11px 18px;
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--text-muted);
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            white-space: nowrap;
+        }
+
+        .tab-btn:hover { color: var(--text-secondary); background: rgba(99,102,241,0.04); }
+        .tab-btn.active { color: var(--accent-hover); border-bottom-color: var(--accent); }
+
+        /* ── Tab Content ── */
+        .tab-content {
+            display: none;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+        }
+        .tab-content.active { display: flex; }
+
+        /* ── SQL Editor Layout ── */
+        .sql-editor-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+
+        /* SQL Main Area */
+        .sql-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+        .sql-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 16px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .btn-run {
+            padding: 7px 18px;
+            background: var(--accent);
+            border: none;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            font-family: inherit;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .btn-run:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-1px); }
+        .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .sql-shortcut { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+
+        .btn-clear-sql {
+            padding: 6px 12px;
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: inherit;
+            transition: all 0.2s;
+            margin-left: auto;
+        }
+        .btn-clear-sql:hover { border-color: var(--accent); color: var(--text-primary); }
+
+        #sql-editor-input {
+            width: 100%;
+            min-height: 120px;
+            max-height: 220px;
+            padding: 14px 16px;
+            background: var(--bg-primary);
+            border: none;
+            outline: none;
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            resize: vertical;
+            tab-size: 4;
+            flex-shrink: 0;
+        }
+        #sql-editor-input::placeholder { color: var(--text-muted); }
+
+        /* SQL Results */
+        .sql-results-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+        .sql-results-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+        .result-stats { display: flex; align-items: center; gap: 16px; }
+        .stat-value { color: var(--accent-hover); font-weight: 600; }
+
+        .sql-results-scroll {
+            flex: 1;
+            overflow: auto;
+            background: var(--bg-primary);
+        }
+        .sql-results-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        .sql-results-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        .sql-empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            padding: 48px 24px;
+            color: var(--text-muted);
+            text-align: center;
+        }
+        .sql-empty-state .empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.5; }
+        .sql-empty-state p { font-size: 14px; margin-bottom: 4px; }
+        .sql-empty-state .empty-hint { font-size: 12px; }
+
+        .sql-error-box {
+            margin: 16px;
+            padding: 14px 16px;
+            background: rgba(239,68,68,0.1);
+            border: 1px solid rgba(239,68,68,0.3);
+            border-radius: 10px;
+            color: #fca5a5;
+            font-size: 13px;
+            font-family: 'JetBrains Mono', monospace;
+            line-height: 1.5;
+        }
+
+        .sql-running {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 48px;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .sql-running .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        @media (max-width: 768px) {
+            .sql-editor-layout { flex-direction: column; }
+
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h2>💬 Chat History</h2>
+        </div>
+        <button class="btn-new-chat" onclick="createNewChat()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            New Chat
+        </button>
+        <div class="history-list" id="history-list"></div>
+        <div class="sidebar-footer">
+            <button class="btn-clear-all" onclick="clearAllHistory()">🗑️ Clear All History</button>
+        </div>
+    </aside>
+
+    <!-- Main Chat Area -->
+    <div class="main-area">
+        <header class="header">
+            <div class="header-left">
+                <button class="btn-toggle-sidebar" onclick="toggleSidebar()" title="Toggle history">☰</button>
+                <div class="logo">🗄️</div>
+                <div class="header-info">
+                    <h1>Data Lakehouse Assistant</h1>
+                    <span>Powered by MiMo AI</span>
+                </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 16px;">
+                <div class="status-indicator">
+                    <span class="status-dot"></span>
+                    Online
+                </div>
+                <button class="btn-reset" onclick="resetChat()">Reset Chat</button>
+            </div>
+        </header>
+
+        <!-- Tab Bar -->
+        <div class="tab-bar">
+            <button class="tab-btn active" data-tab="chat" onclick="switchTab('chat')">💬 AI Chat</button>
+            <button class="tab-btn" data-tab="sql" onclick="switchTab('sql')">⚡ SQL Editor</button>
+        </div>
+
+        <!-- Chat Tab -->
+        <div class="tab-content active" id="tab-chat">
+            <div class="chat-container" id="chat-container">
+                <div class="welcome">
+                    <h2>Welcome!</h2>
+                    <p>I can help you query data from the Data Lakehouse</p>
+                    <div class="suggestions">
+                        <div class="suggestion" onclick="sendSuggestion('How many customers are there?')">Customer count</div>
+                        <div class="suggestion" onclick="sendSuggestion('How many products are there?')">Product count</div>
+                        <div class="suggestion" onclick="sendSuggestion('Revenue by region?')">Revenue by region</div>
+                        <div class="suggestion" onclick="sendSuggestion('Top selling products by category?')">Top selling products</div>
+                        <div class="suggestion" onclick="sendSuggestion('Customer review analysis?')">Review analysis</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-container">
+                <div class="input-wrapper">
+                    <textarea
+                        id="message-input"
+                        placeholder="Type your question..."
+                        rows="1"
+                        onkeydown="handleKeyDown(event)"
+                    ></textarea>
+                    <button class="btn-send" id="send-btn" onclick="sendMessage()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- SQL Editor Tab -->
+        <div class="tab-content" id="tab-sql">
+            <div class="sql-editor-layout">
+
+                <div class="sql-main">
+                    <div class="sql-toolbar">
+                        <button class="btn-run" id="btn-run-sql" onclick="runSQL()">▶ Run Query</button>
+                        <span class="sql-shortcut">Ctrl+Enter</span>
+                        <button class="btn-clear-sql" onclick="clearSQL()">Clear</button>
+                    </div>
+                    <textarea id="sql-editor-input" placeholder="SELECT * FROM delta.gold.fact_orders LIMIT 10" spellcheck="false"></textarea>
+                    <div class="sql-results-area">
+                        <div class="sql-results-header" id="sql-results-header" style="display:none;">
+                            <div class="result-stats">
+                                <span>Rows: <span class="stat-value" id="sql-row-count">0</span></span>
+                                <span>Time: <span class="stat-value" id="sql-exec-time">-</span></span>
+                            </div>
+                        </div>
+                        <div class="sql-results-scroll" id="sql-results-body">
+                            <div class="sql-empty-state">
+                                <div class="empty-icon">⚡</div>
+                                <p>SQL Editor</p>
+                                <span class="empty-hint">Write a query or click a table in the schema browser</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        const chatContainer = document.getElementById('chat-container');
+        const messageInput = document.getElementById('message-input');
+        const sendBtn = document.getElementById('send-btn');
+        const historyList = document.getElementById('history-list');
+        const sidebar = document.getElementById('sidebar');
+
+        const STORAGE_KEY = 'lakehouse_chat_history';
+
+        // ── State ──
+        let conversations = [];   // [{ id, title, messages: [{role, content}], createdAt, updatedAt }]
+        let activeConversationId = null;
+
+        // ── localStorage helpers ──
+        function saveConversations() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+        }
+
+        function loadConversations() {
+            try {
+                const data = localStorage.getItem(STORAGE_KEY);
+                conversations = data ? JSON.parse(data) : [];
+            } catch {
+                conversations = [];
+            }
+        }
+
+        function getActiveConversation() {
+            return conversations.find(c => c.id === activeConversationId) || null;
+        }
+
+        function resetBackendConversation(conversationId = activeConversationId || 'default') {
+            return fetch(API_BASE + '/chat/reset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ conversation_id: conversationId })
+            });
+        }
+
+        // ── Sidebar toggle ──
+        function toggleSidebar() {
+            sidebar.classList.toggle('collapsed');
+            localStorage.setItem('sidebar_collapsed', sidebar.classList.contains('collapsed'));
+        }
+
+        // ── Render sidebar ──
+        function renderHistoryList() {
+            if (conversations.length === 0) {
+                historyList.innerHTML = '<div class="history-empty">No conversations yet.<br>Start a new chat!</div>';
+                return;
+            }
+
+            // Group by date
+            const groups = {};
+            const today = new Date().toDateString();
+            const yesterday = new Date(Date.now() - 86400000).toDateString();
+
+            conversations
+                .slice()
+                .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+                .forEach(conv => {
+                    const d = new Date(conv.updatedAt).toDateString();
+                    let label;
+                    if (d === today) label = 'Today';
+                    else if (d === yesterday) label = 'Yesterday';
+                    else label = new Date(conv.updatedAt).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+                    if (!groups[label]) groups[label] = [];
+                    groups[label].push(conv);
+                });
+
+            let html = '';
+            for (const [label, convs] of Object.entries(groups)) {
+                html += `<div class="history-date-group">${label}</div>`;
+                for (const conv of convs) {
+                    const isActive = conv.id === activeConversationId ? 'active' : '';
+                    html += `
+                        <div class="history-item ${isActive}" data-id="${conv.id}" onclick="switchConversation('${conv.id}')">
+                            <span class="history-item-icon">💬</span>
+                            <span class="history-item-text" title="${escapeAttr(conv.title)}">${escapeHtmlText(conv.title)}</span>
+                            <div class="history-item-actions">
+                                <button class="btn-rename-item" onclick="event.stopPropagation(); renameConversation('${conv.id}')" title="Rename">✏️</button>
+                                <button class="btn-delete-item" onclick="event.stopPropagation(); deleteConversation('${conv.id}')" title="Delete">🗑️</button>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+            historyList.innerHTML = html;
+        }
+
+        function escapeAttr(s) {
+            return s.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function escapeHtmlText(s) {
+            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // ── Conversation CRUD ──
+        function createNewChat() {
+            const conv = {
+                id: 'conv_' + Date.now(),
+                title: 'New Chat',
+                messages: [],
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+            conversations.push(conv);
+            activeConversationId = conv.id;
+            saveConversations();
+            renderHistoryList();
+            renderChatMessages();
+        }
+
+        function switchConversation(id) {
+            if (id === activeConversationId) return;
+            activeConversationId = id;
+
+            saveConversations();
+            renderHistoryList();
+            renderChatMessages();
+        }
+
+        function deleteConversation(id) {
+            if (!confirm('Delete this conversation?')) return;
+            conversations = conversations.filter(c => c.id !== id);
+
+            if (activeConversationId === id) {
+                resetBackendConversation(id).catch(() => {});
+                activeConversationId = conversations.length > 0 ? conversations[conversations.length - 1].id : null;
+            }
+
+            saveConversations();
+            renderHistoryList();
+
+            if (activeConversationId) {
+                renderChatMessages();
+            } else {
+                renderWelcome();
+            }
+        }
+
+        function renameConversation(id) {
+            const item = historyList.querySelector(`[data-id="${id}"] .history-item-text`);
+            if (!item) return;
+
+            const conv = conversations.find(c => c.id === id);
+            const oldTitle = conv.title;
+
+            const input = document.createElement('input');
+            input.className = 'rename-input';
+            input.value = oldTitle;
+            item.replaceWith(input);
+            input.focus();
+            input.select();
+
+            const finish = () => {
+                const newTitle = input.value.trim() || oldTitle;
+                conv.title = newTitle;
+                saveConversations();
+                renderHistoryList();
+            };
+
+            input.addEventListener('blur', finish);
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+                if (e.key === 'Escape') { input.value = oldTitle; input.blur(); }
+            });
+        }
+
+        function clearAllHistory() {
+            if (!confirm('Clear all chat history? This cannot be undone.')) return;
+            conversations = [];
+            activeConversationId = null;
+            saveConversations();
+            renderHistoryList();
+            renderWelcome();
+            resetBackendConversation().catch(() => {});
+        }
+
+        // ── Render messages for active conversation ──
+        function renderChatMessages() {
+            const conv = getActiveConversation();
+            if (!conv || conv.messages.length === 0) {
+                renderWelcome();
+                return;
+            }
+
+            chatContainer.innerHTML = '';
+            for (const msg of conv.messages) {
+                appendMessageBubble(msg.content, msg.role, false);
+            }
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function renderWelcome() {
+            chatContainer.innerHTML = `
+                <div class="welcome">
+                    <h2>Welcome!</h2>
+                    <p>I can help you query data from the Data Lakehouse</p>
+                    <div class="suggestions">
+                        <div class="suggestion" onclick="sendSuggestion('How many customers are there?')">Customer count</div>
+                        <div class="suggestion" onclick="sendSuggestion('How many products are there?')">Product count</div>
+                        <div class="suggestion" onclick="sendSuggestion('Revenue by region?')">Revenue by region</div>
+                        <div class="suggestion" onclick="sendSuggestion('Top selling products by category?')">Top selling products</div>
+                        <div class="suggestion" onclick="sendSuggestion('Customer review analysis?')">Review analysis</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ── Message rendering ──
+        function appendMessageBubble(content, role, animate = true) {
+            // Remove welcome if present
+            const welcome = chatContainer.querySelector('.welcome');
+            if (welcome) welcome.remove();
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+            if (!animate) messageDiv.style.animation = 'none';
+
+            const avatar = role === 'user' ? '👤' : '🤖';
+            const formattedContent = formatMessage(content);
+
+            messageDiv.innerHTML = `
+                <div class="avatar">${avatar}</div>
+                <div class="message-content">${formattedContent}</div>
+            `;
+
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function formatMessage(content) {
+            const placeholders = [];
+
+            function escapeHtml(text) {
+                return text
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#039;");
+            }
+
+            function parseMarkdownTable(rows) {
+                if (rows.length < 2) return rows.join('\n');
+                
+                const headers = rows[0].split('|').map(s => s.trim()).filter((s, idx, arr) => idx > 0 && idx < arr.length - 1);
+                const separator = rows[1];
+                if (!separator.includes('-')) {
+                    return rows.join('\n');
+                }
+                
+                let html = '<div class="table-container"><table><thead><tr>';
+                headers.forEach(h => {
+                    html += `<th>${h}</th>`;
+                });
+                html += '</tr></thead><tbody>';
+                
+                for (let r = 2; r < rows.length; r++) {
+                    const cells = rows[r].split('|').map(s => s.trim()).filter((s, idx, arr) => idx > 0 && idx < arr.length - 1);
+                    html += '<tr>';
+                    for (let c = 0; c < headers.length; c++) {
+                        html += `<td>${cells[c] || ''}</td>`;
+                    }
+                    html += '</tr>';
+                }
+                html += '</tbody></table></div>';
+                return html;
+            }
+
+            const lines = content.split('\n');
+            let inTable = false;
+            let tableRows = [];
+            let processedLines = [];
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (line.startsWith('|') && line.endsWith('|')) {
+                    if (!inTable) {
+                        inTable = true;
+                        tableRows = [];
+                    }
+                    tableRows.push(line);
+                } else {
+                    if (inTable) {
+                        processedLines.push(parseMarkdownTable(tableRows));
+                        inTable = false;
+                    }
+                    processedLines.push(lines[i]);
+                }
+            }
+            if (inTable) {
+                processedLines.push(parseMarkdownTable(tableRows));
+            }
+            content = processedLines.join('\n');
+
+            content = content.replace(/```sql\n([\s\S]*?)```/gi, function(match, sqlCode) {
+                const placeholder = `__PLACEHOLDER_SQL_${placeholders.length}__`;
+                placeholders.push({
+                    placeholder: placeholder,
+                    html: `<details class="sql-details">
+                        <summary>
+                            <svg class="sql-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                                <line x1="8" y1="21" x2="16" y2="21"></line>
+                                <line x1="12" y1="17" x2="12" y2="21"></line>
+                            </svg>
+                            <span>View Executed Trino SQL Query</span>
+                            <svg class="chevron-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </summary>
+                        <div class="sql-body">
+                            <pre><code>${escapeHtml(sqlCode.trim())}</code></pre>
+                        </div>
+                    </details>`
+                });
+                return placeholder;
+            });
+
+            content = content.replace(/```(\w+)?\n([\s\S]*?)```/g, function(match, lang, code) {
+                const placeholder = `__PLACEHOLDER_CODE_${placeholders.length}__`;
+                placeholders.push({
+                    placeholder: placeholder,
+                    html: `<pre><code>${escapeHtml(code.trim())}</code></pre>`
+                });
+                return placeholder;
+            });
+
+            // Process line-by-line for block-level markdown
+            const mdLines = content.split('\n');
+            const rendered = [];
+            let listBuffer = [];   // pending <li> items
+            let listType = null;  // 'ul' or 'ol'
+
+            function flushList() {
+                if (!listBuffer.length) return;
+                rendered.push(`<${listType}>${listBuffer.join('')}</${listType}>`);
+                listBuffer = [];
+                listType = null;
+            }
+
+            for (let i = 0; i < mdLines.length; i++) {
+                const raw = mdLines[i];
+                const line = raw.trim();
+
+                // Horizontal rule: --- or *** or ___
+                if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) {
+                    flushList();
+                    rendered.push('<hr>');
+                    continue;
+                }
+
+                // ATX Headings: # ## ### ####
+                const hMatch = line.match(/^(#{1,4})\s+(.+)$/);
+                if (hMatch) {
+                    flushList();
+                    const level = hMatch[1].length;
+                    const text = hMatch[2];
+                    rendered.push(`<h${level}>${text}</h${level}>`);
+                    continue;
+                }
+
+                // Unordered list: - item  or  * item
+                const ulMatch = line.match(/^[\-\*]\s+(.+)$/);
+                if (ulMatch) {
+                    if (listType !== 'ul') { flushList(); listType = 'ul'; }
+                    listBuffer.push(`<li>${ulMatch[1]}</li>`);
+                    continue;
+                }
+
+                // Ordered list: 1. item
+                const olMatch = line.match(/^\d+\.\s+(.+)$/);
+                if (olMatch) {
+                    if (listType !== 'ol') { flushList(); listType = 'ol'; }
+                    listBuffer.push(`<li>${olMatch[1]}</li>`);
+                    continue;
+                }
+
+                // Empty line: flush list, emit a single <br>
+                if (line === '') {
+                    flushList();
+                    rendered.push('<br>');
+                    continue;
+                }
+
+                // Normal text line — append <br> inline so block elements above
+                // don't accumulate extra line breaks from the join
+                flushList();
+                rendered.push(raw + '<br>');
+            }
+            flushList();
+            // Join with no separator — each item already carries its own spacing
+            content = rendered.join('');
+
+            // Inline: code, bold, italic
+            content = content.replace(/`([^`]+)`/g, '<code>$1</code>');
+            content = content.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            content = content.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+
+
+            placeholders.forEach(item => {
+                content = content.replace(item.placeholder, item.html);
+            });
+
+            return content;
+        }
+
+        // ── Typing indicator ──
+        function showTyping() {
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'message assistant';
+            typingDiv.id = 'typing';
+            typingDiv.innerHTML = `
+                <div class="avatar">🤖</div>
+                <div class="typing-indicator">
+                    <span></span><span></span><span></span>
+                </div>
+            `;
+            chatContainer.appendChild(typingDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function hideTyping() {
+            const typing = document.getElementById('typing');
+            if (typing) typing.remove();
+        }
+
+        // ── Input handlers ──
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        });
+
+        function handleKeyDown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function sendSuggestion(text) {
+            messageInput.value = text;
+            sendMessage();
+        }
+
+        // ── Send message ──
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message || sendBtn.disabled) return;
+
+            // Auto-create a conversation if none active
+            if (!activeConversationId) {
+                createNewChat();
+            }
+
+            const conv = getActiveConversation();
+
+            // Auto-title from first user message
+            if (conv.messages.length === 0) {
+                conv.title = message.length > 40 ? message.substring(0, 40) + '…' : message;
+            }
+
+            // Save user message
+            conv.messages.push({ role: 'user', content: message });
+            conv.updatedAt = new Date().toISOString();
+            saveConversations();
+            renderHistoryList();
+
+            appendMessageBubble(message, 'user');
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            sendBtn.disabled = true;
+
+            showTyping();
+
+            try {
+                const response = await fetch(API_BASE + '/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message, conversation_id: conv.id })
+                });
+
+                const data = await response.json();
+                hideTyping();
+
+                const assistantMsg = response.ok
+                    ? data.response
+                    : ('Sorry, an error occurred: ' + (data.detail || 'Unknown error'));
+
+                // Save assistant message
+                conv.messages.push({ role: 'assistant', content: assistantMsg });
+                conv.updatedAt = new Date().toISOString();
+                saveConversations();
+
+                appendMessageBubble(assistantMsg, 'assistant');
+            } catch (error) {
+                hideTyping();
+                console.error('Fetch error:', error);
+                const errMsg = 'I\'m having trouble connecting to the server. Please check if the service is running and try again. 🔧';
+                conv.messages.push({ role: 'assistant', content: errMsg });
+                conv.updatedAt = new Date().toISOString();
+                saveConversations();
+                appendMessageBubble(errMsg, 'assistant');
+            } finally {
+                sendBtn.disabled = false;
+                messageInput.focus();
+            }
+        }
+
+        // ── Reset current chat ──
+        async function resetChat() {
+            try {
+                await resetBackendConversation();
+            } catch {}
+
+            if (activeConversationId) {
+                const conv = getActiveConversation();
+                if (conv) {
+                    conv.messages = [];
+                    conv.updatedAt = new Date().toISOString();
+                    saveConversations();
+                }
+            }
+
+            renderWelcome();
+            renderHistoryList();
+        }
+
+        // ── Init ──
+        function init() {
+            loadConversations();
+
+            // Restore sidebar state
+            const sidebarCollapsed = localStorage.getItem('sidebar_collapsed');
+            if (sidebarCollapsed === 'true') {
+                sidebar.classList.add('collapsed');
+            }
+
+            // Load last active conversation or show welcome
+            if (conversations.length > 0) {
+                // Pick the most recently updated
+                const sorted = conversations.slice().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+                activeConversationId = sorted[0].id;
+                renderChatMessages();
+            } else {
+                renderWelcome();
+            }
+
+            renderHistoryList();
+            messageInput.focus();
+        }
+
+        init();
+
+        // ── Tab Switching ──
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelector('.tab-btn[data-tab="' + tab + '"]').classList.add('active');
+            document.getElementById('tab-' + tab).classList.add('active');
+
+            if (tab === 'chat') setTimeout(() => messageInput.focus(), 50);
+        }
+
+
+        // ── SQL Execution ──
+        async function runSQL() {
+            const sql = document.getElementById('sql-editor-input').value.trim();
+            if (!sql) return;
+            const btn = document.getElementById('btn-run-sql');
+            const body = document.getElementById('sql-results-body');
+            const header = document.getElementById('sql-results-header');
+            btn.disabled = true;
+            btn.textContent = '⏳ Running...';
+            header.style.display = 'none';
+            body.innerHTML = '<div class="sql-running"><div class="spinner"></div>Executing query...</div>';
+            try {
+                const res = await fetch(API_BASE + '/sql/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sql })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    body.innerHTML = '<div class="sql-error-box">❌ ' + (data.detail || 'Query failed') + '</div>';
+                    return;
+                }
+                header.style.display = 'flex';
+                document.getElementById('sql-row-count').textContent = data.count;
+                document.getElementById('sql-exec-time').textContent = (data.execution_time_ms ?? '-') + 'ms';
+                if (!data.columns || data.columns.length === 0 || data.count === 0) {
+                    body.innerHTML = '<div class="sql-empty-state"><div class="empty-icon">📭</div><p>Query returned no results</p></div>';
+                    return;
+                }
+                let html = '<div class="table-container" style="border-radius:0;border:none;"><table><thead><tr>';
+                data.columns.forEach(col => { html += '<th>' + col + '</th>'; });
+                html += '</tr></thead><tbody>';
+                data.data.forEach(row => {
+                    html += '<tr>';
+                    data.columns.forEach(col => {
+                        const val = row[col];
+                        html += '<td>' + (val === null ? '<span style="color:var(--text-muted)">NULL</span>' : escapeHtmlVal(String(val))) + '</td>';
+                    });
+                    html += '</tr>';
+                });
+                html += '</tbody></table></div>';
+                body.innerHTML = html;
+            } catch (err) {
+                body.innerHTML = '<div class="sql-error-box">❌ Connection error: ' + err.message + '</div>';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '▶ Run Query';
+            }
+        }
+
+        function escapeHtmlVal(text) {
+            const d = document.createElement('div');
+            d.textContent = text;
+            return d.innerHTML;
+        }
+
+        function clearSQL() {
+            document.getElementById('sql-editor-input').value = '';
+            document.getElementById('sql-editor-input').focus();
+        }
+
+        // Ctrl+Enter runs SQL when editor is focused
+        document.getElementById('sql-editor-input').addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                runSQL();
+            }
+        });
+    </script>
+</body>
+</html>

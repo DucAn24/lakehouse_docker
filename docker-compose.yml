@@ -1,0 +1,363 @@
+# ==========================================
+# E-Commerce & Clickstream Lakehouse — Docker Compose
+# ==========================================
+# Bản chuyển đổi từ Helm chart (helm/lakehouse) sang Docker Compose.
+#   docker compose up -d                  → core ETL stack (Postgres, MinIO, Kafka, Debezium, Unity Catalog, Trino, Spark, Airflow)
+#   docker compose --profile apps up -d   → thêm Metabase, Grafana, Kafka UI, FastAPI chatbot
+# Biến môi trường lấy từ .env (copy từ .env.example).
+# ==========================================
+
+x-common-env: &common-env
+  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+  POSTGRES_DB: ${POSTGRES_DB:-orders}
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-password123}
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-password123}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  S3_ENDPOINT: http://minio:9000
+  UC_URI: http://unitycatalog:8080
+  UC_CATALOG: lakehouse
+  KAFKA_BROKER: kafka:9092
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  TRINO_HOST: trino
+  TRINO_PORT: "8080"
+  TRINO_CATALOG: delta
+  TRINO_SCHEMA: gold
+  TRINO_USER: admin
+
+x-spark-image: &spark-image
+  build: ./spark
+  image: spark-lakehouse:latest
+
+services:
+  # ================== 01. DATA TIER ==================
+  postgres:
+    image: postgres:15-alpine
+    command: ["postgres", "-c", "wal_level=logical"]
+    environment: *common-env
+    ports: ["5432:5432"]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+      - ${DATASET_DIR:-../dataset}:/data:ro
+      - ./Script:/sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: ${POSTGRES_MEM_LIMIT:-512m}
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment: *common-env
+    ports: ["9000:9000", "9001:9001"]
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: ${MINIO_MEM_LIMIT:-512m}
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    environment:
+      <<: *common-env
+      UC_S3_ACCESS_KEY: ${UC_S3_ACCESS_KEY:-unitycatalog}
+      UC_S3_SECRET_KEY: ${UC_S3_SECRET_KEY:-unitycatalog123}
+    depends_on:
+      minio: { condition: service_healthy }
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set myminio http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD; do
+          echo "  → MinIO not ready, retrying in 5s..."; sleep 5
+        done
+        mc mb myminio/bronze --ignore-existing
+        mc mb myminio/silver --ignore-existing
+        mc mb myminio/gold --ignore-existing
+        mc mb myminio/trino-metastore --ignore-existing
+        echo "✓ All buckets created: bronze, silver, gold, trino-metastore"
+        # User riêng cho Unity Catalog: MinIO không cho root user gọi STS AssumeRole
+        mc admin user add myminio $$UC_S3_ACCESS_KEY $$UC_S3_SECRET_KEY
+        mc admin policy attach myminio readwrite --user $$UC_S3_ACCESS_KEY || true
+        echo "✓ Unity Catalog MinIO user ready: $$UC_S3_ACCESS_KEY"
+    restart: "no"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: ${KAFKA_HEAP_OPTS:--Xms256m -Xmx512m}
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    ports: ["29092:29092"]
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+    mem_limit: ${KAFKA_MEM_LIMIT:-1g}
+    restart: unless-stopped
+
+  # ================== 02. PROCESSING TIER ==================
+  connect:
+    image: debezium/connect:2.7.0.Final
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: "1"
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      STATUS_STORAGE_TOPIC: connect_status
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      ENABLE_DEBEZIUM_SCRIPTING: "false"
+      HEAP_OPTS: ${CONNECT_HEAP_OPTS:--Xms256m -Xmx512m}
+    ports: ["8083:8083"]
+    depends_on:
+      kafka: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/connectors > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    mem_limit: ${CONNECT_MEM_LIMIT:-1g}
+    restart: unless-stopped
+
+  connect-init:
+    image: curlimages/curl:latest
+    environment:
+      CONNECT_URL: http://connect:8083
+    volumes:
+      - ./connectors:/connectors:ro
+    depends_on:
+      connect: { condition: service_healthy }
+    entrypoint: ["/bin/sh", "/connectors/register-connectors.sh"]
+    restart: "no"
+
+  # Unity Catalog OSS — catalog cho Spark (thay Hive Metastore).
+  # Metadata lưu H2 trong volume uc-data (image không kèm JDBC driver Postgres).
+  # Credential vending: UC gọi STS AssumeRole của MinIO (AWS_ENDPOINT_URL_STS) bằng user UC_S3_*.
+  unitycatalog:
+    image: unitycatalog/unitycatalog:v0.6.0
+    environment:
+      AWS_ENDPOINT_URL_STS: http://minio:9000
+      s3.accessKey.0: ${UC_S3_ACCESS_KEY:-unitycatalog}
+      s3.secretKey.0: ${UC_S3_SECRET_KEY:-unitycatalog123}
+      s3.accessKey.1: ${UC_S3_ACCESS_KEY:-unitycatalog}
+      s3.secretKey.1: ${UC_S3_SECRET_KEY:-unitycatalog123}
+      s3.accessKey.2: ${UC_S3_ACCESS_KEY:-unitycatalog}
+      s3.secretKey.2: ${UC_S3_SECRET_KEY:-unitycatalog123}
+    ports: ["8086:8080"]
+    volumes:
+      - ./unitycatalog/server.properties:/home/unitycatalog/etc/conf/server.properties:ro
+      - uc-data:/home/unitycatalog/etc/db
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/2.1/unity-catalog/catalogs > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    mem_limit: ${UC_MEM_LIMIT:-768m}
+    restart: unless-stopped
+
+  uc-init:
+    image: curlimages/curl:latest
+    depends_on:
+      unitycatalog: { condition: service_healthy }
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        UC=http://unitycatalog:8080/api/2.1/unity-catalog
+        if curl -sf $$UC/catalogs/lakehouse > /dev/null; then
+          echo "✓ Catalog 'lakehouse' already exists"
+        else
+          curl -sf -X POST $$UC/catalogs -H 'Content-Type: application/json'             -d '{"name": "lakehouse", "comment": "E-commerce & clickstream lakehouse"}' && echo
+          echo "✓ Catalog 'lakehouse' created"
+        fi
+    restart: "no"
+
+  # Pin version: catalog delta dùng file metastore (hive.metastore=file), không có trong docs Trino
+  trino:
+    image: trinodb/trino:483
+    ports: ["8081:8080"]
+    volumes:
+      - ./trino/config.properties:/etc/trino/config.properties:ro
+      - ./trino/catalog/delta.properties:/etc/trino/catalog/delta.properties:ro
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
+    mem_limit: ${TRINO_MEM_LIMIT:-1500m}
+    restart: unless-stopped
+
+  # ================== 03. SPARK TIER ==================
+  spark-master:
+    <<: *spark-image
+    hostname: spark-master
+    command: ["bash", "-c", "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master --host spark-master"]
+    environment:
+      <<: *common-env
+      SPARK_MODE: master
+      SPARK_MASTER_PORT: "7077"
+    ports: ["8080:8080"]
+    volumes:
+      - ./spark/app:/opt/spark/app
+    mem_limit: ${SPARK_MASTER_MEM_LIMIT:-768m}
+    restart: unless-stopped
+
+  spark-worker:
+    <<: *spark-image
+    command: ["bash", "-c", "/opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077"]
+    environment:
+      <<: *common-env
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_MASTER_PORT: "7077"
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-2g}
+    volumes:
+      - ./spark/app:/opt/spark/app
+    depends_on:
+      - spark-master
+    mem_limit: ${SPARK_WORKER_MEM_LIMIT:-2500m}
+    restart: unless-stopped
+
+  # ================== 04. AIRFLOW TIER ==================
+  airflow:
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
+    image: airflow-lakehouse:latest
+    command:
+      - bash
+      - -c
+      - |
+        airflow db migrate
+        airflow users create -u airflow -p airflow -f Airflow -l Admin -r Admin -e airflow@example.com || true
+        airflow api-server -p 8080 &
+        airflow dag-processor &
+        airflow triggerer &
+        exec airflow scheduler
+    environment:
+      <<: *common-env
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-123456}@postgres:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+      AIRFLOW_CONN_SPARK_DEFAULT: spark://spark-master:7077
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+      AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: "300"
+      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-1500m}
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-512m}
+    ports: ["8084:8080"]
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./spark/app:/opt/spark/app
+    depends_on:
+      postgres: { condition: service_healthy }
+      spark-master: { condition: service_started }
+      uc-init: { condition: service_completed_successfully }
+    mem_limit: ${AIRFLOW_MEM_LIMIT:-2g}
+    restart: unless-stopped
+
+  # ================== 05. APPS TIER (profile: apps) ==================
+  metabase:
+    image: metabase/metabase:latest
+    profiles: ["apps"]
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: metabase
+      MB_DB_PORT: "5432"
+      MB_DB_USER: ${POSTGRES_USER:-postgres}
+      MB_DB_PASS: ${POSTGRES_PASSWORD:-123456}
+      MB_DB_HOST: postgres
+    ports: ["3000:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    mem_limit: ${METABASE_MEM_LIMIT:-1500m}
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    profiles: ["apps"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: trino-datasource 1.2.0
+    ports: ["3001:3000"]
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - trino
+    mem_limit: ${GRAFANA_MEM_LIMIT:-512m}
+    restart: unless-stopped
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    profiles: ["apps"]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: kraft-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL: PLAINTEXT
+      KAFKA_CLUSTERS_0_READONLY: "false"
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium-connect
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://connect:8083
+    ports: ["8085:8080"]
+    depends_on:
+      - kafka
+    mem_limit: ${KAFKA_UI_MEM_LIMIT:-512m}
+    restart: unless-stopped
+
+  fastapi:
+    build: ./api
+    image: lakehouse-fastapi:latest
+    profiles: ["apps"]
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    environment:
+      <<: *common-env
+      MIMO_API_KEY: ${MIMO_API_KEY:-}
+      MIMO_BASE_URL: ${MIMO_BASE_URL:-https://api.xiaomimimo.com/v1}
+      MIMO_MODEL: ${MIMO_MODEL:-mimo-v2.5}
+      # Bind mount từ Windows không phát sự kiện inotify → dùng polling cho --reload
+      WATCHFILES_FORCE_POLLING: "true"
+    ports: ["8000:8000"]
+    volumes:
+      - ./api:/app
+    depends_on:
+      - trino
+    mem_limit: ${FASTAPI_MEM_LIMIT:-512m}
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  minio-data:
+  kafka-data:
+  grafana-data:
+  uc-data:

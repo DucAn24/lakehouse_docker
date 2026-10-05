@@ -1,0 +1,13 @@
+apiVersion: 1
+
+datasources:
+  - name: Trino (Delta Lake)
+    uid: trino-delta
+    type: trino-datasource
+    access: proxy
+    url: http://trino:8080
+    # Plugin lấy Trino user từ basic auth (không có mật khẩu vì Trino chưa bật auth)
+    basicAuth: true
+    basicAuthUser: admin
+    isDefault: true
+    editable: true

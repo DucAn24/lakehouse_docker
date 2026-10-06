@@ -29,7 +29,7 @@ x-common-env: &common-env
 
 x-spark-image: &spark-image
   build: ./spark
-  image: spark-lakehouse:latest
+  image: ${SPARK_IMAGE:-spark-lakehouse:latest}
 
 services:
   # ================== 01. DATA TIER ==================
@@ -250,7 +250,7 @@ services:
     build:
       context: .
       dockerfile: airflow/Dockerfile
-    image: airflow-lakehouse:latest
+    image: ${AIRFLOW_IMAGE:-airflow-lakehouse:latest}
     command:
       - bash
       - -c
@@ -337,7 +337,7 @@ services:
 
   fastapi:
     build: ./api
-    image: lakehouse-fastapi:latest
+    image: ${FASTAPI_IMAGE:-lakehouse-fastapi:latest}
     profiles: ["apps"]
     command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     environment:

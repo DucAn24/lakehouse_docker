@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import (
+    coalesce,
     col,
     desc,
     from_unixtime,
@@ -38,9 +39,23 @@ def extract_cdc_latest(
 ) -> DataFrame:
     """Extract the latest CDC record per business key.
 
-    Filters out deletes (op='d'), optionally unpacks the 'after' struct,
-    and deduplicates by key_cols using ts_col descending.
+    Keeps the newest event per key (by ts_col descending) and then drops keys whose newest
+    event is a delete (op='d'), so rows deleted at the source do not survive. Optionally
+    unpacks the 'after' struct. A delete has no 'after' image, so with select_after the key
+    is read from 'before' when that column exists; without it deletes cannot be matched to
+    their key and are only filtered out.
     """
+    if select_after and "before" in df.columns:
+        keys = [coalesce(col(f"after.{k}"), col(f"before.{k}")).alias(f"_key_{i}") for i, k in enumerate(key_cols)]
+        key_names = [f"_key_{i}" for i in range(len(key_cols))]
+        events = df.select("op", ts_col, *keys, "after.*")
+        window_spec = Window.partitionBy(*key_names).orderBy(desc(ts_col))
+        return (
+            events.withColumn("_row_num", row_number().over(window_spec))
+            .filter((col("_row_num") == 1) & (col("op") != "d"))
+            .drop("_row_num", "op", ts_col, *key_names)
+        )
+
     df_active = df.filter(col("op") != "d")
 
     if select_after:

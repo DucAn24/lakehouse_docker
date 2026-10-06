@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+  workflow_dispatch:
+  # CD calls this workflow first, so master pushes are checked exactly once
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint & static checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Ruff
+        run: |
+          pip install ruff==0.15.8
+          ruff check api/ airflow/dags/ spark/app/ scripts/
+
+      - name: Compile Python
+        run: find spark/app airflow/dags api scripts -name '*.py' -exec python -m py_compile {} +
+
+      - name: Spark layout (imports, job paths, table registry vs quality rules)
+        run: python scripts/check_spark_layout.py
+
+  tests:
+    name: Pytest (unit + end-to-end on local Spark/Delta)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: tests/requirements.txt
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install test dependencies
+        run: pip install -r tests/requirements.txt
+
+      - name: Pytest
+        run: python -m pytest tests
+
+  dags:
+    name: Airflow DAG import
+    runs-on: ubuntu-latest
+    env:
+      AIRFLOW_VERSION: "3.2.1"
+      AIRFLOW_HOME: ${{ github.workspace }}/.airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_FOLDER: ${{ github.workspace }}/airflow/dags
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11" # same as the airflow image (apache/airflow:3.2.1-python3.11)
+          cache: pip
+          cache-dependency-path: .github/workflows/ci.yml
+
+      - name: Install Airflow (pinned with official constraints)
+        run: |
+          pip install "apache-airflow==${AIRFLOW_VERSION}" apache-airflow-providers-apache-spark \
+            --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-3.11.txt"
+
+      - name: Init metadata DB (sqlite)
+        run: airflow db migrate
+
+      - name: Parse DAGs and check Spark job paths
+        run: python scripts/check_dags.py
+
+  compose:
+    name: Compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate docker-compose.yml (core + apps profile)
+        run: |
+          cp .env.example .env
+          docker compose config -q
+          docker compose --profile apps config -q
+
+  build:
+    name: Build ${{ matrix.name }} image
+    needs: [lint, tests, dags, compose]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: spark
+            context: spark
+            dockerfile: spark/Dockerfile
+          - name: airflow
+            context: .
+            dockerfile: airflow/Dockerfile
+          - name: fastapi
+            context: api
+            dockerfile: api/Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max

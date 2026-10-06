@@ -343,10 +343,12 @@ def validate_table(
     for rule_name, condition in (rules or {}).items():
         try:
             violations = df.filter(~coalesce(condition, lit(False))).count()
+            pct = (violations / total * 100) if total > 0 else 0
+            ok = pct <= 5.0
         except Exception:
             violations = -1
-        pct = (violations / total * 100) if total > 0 else 0
-        ok = pct <= 5.0
+            pct = 100.0
+            ok = False
         if not ok:
             passed = False
         results.append(

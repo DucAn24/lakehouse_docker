@@ -22,6 +22,10 @@ Verify:
 
 ```bash
 docker compose config -q
-ruff check api/ airflow/dags/ spark/app/
+ruff check api/ airflow/dags/ spark/app/ scripts/
+python scripts/check_spark_layout.py   # imports, DAG job paths, table registry vs DQ rules
 find spark/app -name '*.py' -exec python -m py_compile {} +
+pip install -r tests/requirements.txt && python -m pytest tests   # needs JDK 17+; Spark tests skip without Java
 ```
+
+Tests (`tests/`): registry/layout (no Spark), `common/` units, DQ rules, DAG structure (skipped without Airflow) and an end-to-end run (`test_pipeline_e2e.py`: tiny Debezium bronze fixtures in `bronze_fixtures.py` → every silver/gold job → DQ gates) on local Spark + Delta. `BRONZE_BUCKET`/`SILVER_BUCKET`/`GOLD_BUCKET` env vars override the `s3a://` buckets; conftest points them at a temp dir. New table → add a fixture to `bronze_fixtures.py` (the e2e test fails if a bronze table has none).

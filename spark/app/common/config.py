@@ -16,9 +16,10 @@ TRINO_URL = f"http://{os.environ.get('TRINO_HOST', 'trino')}:{os.environ.get('TR
 TRINO_USER = os.environ.get("TRINO_USER", "admin")
 TRINO_DELTA_CATALOG = "delta"
 
-BRONZE_BUCKET = "s3a://bronze"
-SILVER_BUCKET = "s3a://silver"
-GOLD_BUCKET = "s3a://gold"
+# Overridable so tests can run the whole pipeline against a local directory
+BRONZE_BUCKET = os.environ.get("BRONZE_BUCKET", "s3a://bronze")
+SILVER_BUCKET = os.environ.get("SILVER_BUCKET", "s3a://silver")
+GOLD_BUCKET = os.environ.get("GOLD_BUCKET", "s3a://gold")
 
 # Pipeline observability paths
 METRICS_PATH = f"{GOLD_BUCKET}/_pipeline_metrics/"

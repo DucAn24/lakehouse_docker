@@ -149,3 +149,12 @@ spark/app/
 
 Thêm bảng mới: viết job trong `jobs/<layer>/…`, thêm vào `common/tables.py` và rule trong `common/quality.py`, rồi thêm task vào DAG (đường dẫn qua `SILVER_JOBS` / `GOLD_JOBS` trong `airflow/dags/spark_submit_defaults.py`).
 
+## CI/CD (GitHub Actions)
+
+| Workflow | Khi nào | Làm gì |
+|---|---|---|
+| `.github/workflows/ci.yml` | push `dev`, mọi pull request, chạy tay | `ruff` + `py_compile`; `scripts/check_spark_layout.py`; cài Airflow 3.2.1 và parse toàn bộ DAG (`scripts/check_dags.py` — lỗi import, đường dẫn job Spark không tồn tại); `docker compose config`; build 3 image `spark`, `airflow`, `fastapi` (không push, cache GHA) |
+| `.github/workflows/cd.yml` | push `master`, tag `v*`, chạy tay | chạy lại CI, rồi build & push lên GHCR: `ghcr.io/<owner>/lakehouse-{spark,airflow,fastapi}` với tag `master` / `latest`, `sha-xxxxxxx`, và `1.2.3` / `1.2` khi push tag `v1.2.3` |
+
+Dùng image đã publish trên máy deploy: đặt `SPARK_IMAGE`, `AIRFLOW_IMAGE`, `FASTAPI_IMAGE` trong `.env` (mẫu trong `.env.example`), rồi `docker compose pull && docker compose up -d --no-build`. Package GHCR mặc định private — `docker login ghcr.io` bằng PAT có quyền `read:packages`, hoặc đổi package sang public.
+

@@ -1,4 +1,5 @@
 import sys
+from datetime import datetime
 
 from pyspark.sql.functions import col, when, current_timestamp
 
@@ -59,7 +60,13 @@ def run(spark):
         current_timestamp().alias("etl_loaded_at"),
     )
 
-    write_with_metrics(df_dim, spark, "gold", "dim_product", GOLD_PATH)
+    unknown_row = [
+        (-1, "UNKNOWN", "UNKNOWN", "UNKNOWN", None, None, None, None, None, None, None, None, "UNKNOWN", "UNKNOWN", datetime.now())
+    ]
+    df_unknown = spark.createDataFrame(unknown_row, schema=df_dim.schema)
+    df_final = df_dim.unionByName(df_unknown)
+
+    write_with_metrics(df_final, spark, "gold", "dim_product", GOLD_PATH)
 
 
 if __name__ == "__main__":

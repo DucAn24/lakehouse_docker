@@ -118,3 +118,8 @@ def dq_kwargs(layer: str, **extra) -> dict:
 def register_kwargs(layer: str, **extra) -> dict:
     """SparkSubmitOperator kwargs that register every table of a layer in Unity Catalog + Trino."""
     return common_kwargs(f"{layer.capitalize()}_RegisterTables", f"{JOBS_DIR}/{layer}/register_tables.py", **extra)
+
+
+def monitoring_kwargs(**extra) -> dict:
+    """SparkSubmitOperator kwargs that expose the pipeline metrics + DQ log tables to Trino / Grafana."""
+    return common_kwargs("Ops_RegisterMonitoring", f"{OPS_JOBS}/register_monitoring.py", **extra)

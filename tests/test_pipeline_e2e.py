@@ -18,7 +18,7 @@ from pyspark.sql.functions import col
 from bronze_fixtures import BRONZE
 from common.config import METRICS_PATH
 from common.quality import CHECKS, run_quality_checks
-from common.tables import TABLES, table_path
+from common.tables import SILVER_KEYS, TABLES, table_path
 
 JOBS = Path(__file__).resolve().parents[1] / "spark" / "app" / "jobs"
 
@@ -71,6 +71,29 @@ def test_jobs_are_idempotent(spark, lake):
     before = lake("silver", "olist_orders").count()
     _module("silver", "olist_orders").run(spark)
     assert lake("silver", "olist_orders").count() == before
+
+
+def test_silver_rerun_is_an_incremental_noop(spark, lake):
+    stamps = {r.order_id: r.processed_at for r in lake("silver", "olist_orders").collect()}
+    _module("silver", "olist_orders").run(spark)
+    assert {r.order_id: r.processed_at for r in lake("silver", "olist_orders").collect()} == stamps
+    last = (
+        spark.read.format("delta")
+        .load(METRICS_PATH)
+        .filter((col("table_name") == "olist_orders") & (col("layer") == "silver"))
+        .orderBy(col("recorded_at").desc())
+        .first()
+    )
+    assert (last.write_mode, last.rows_inserted, last.rows_updated, last.rows_deleted) == ("merge", 0, 0, 0)
+
+
+def test_silver_tables_have_change_feed_and_keys_match_dq(spark, lake):
+    checks = CHECKS["silver"]()
+    assert set(SILVER_KEYS) == set(TABLES["silver"])
+    for table, path in TABLES["silver"].items():
+        assert SILVER_KEYS[table] == checks[table]["primary_keys"], table
+        props = spark.sql(f"DESCRIBE DETAIL delta.`{path}`").first()["properties"]
+        assert props["delta.enableChangeDataFeed"] == "true", table
 
 
 # ---- silver business rules ---------------------------------------------------------------

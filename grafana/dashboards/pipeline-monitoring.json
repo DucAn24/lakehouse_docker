@@ -1,0 +1,642 @@
+{
+  "uid": "lakehouse-monitoring",
+  "title": "Pipeline Monitoring",
+  "tags": [
+    "lakehouse",
+    "monitoring"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "5m",
+  "timezone": "browser",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Health",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Stale tables",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT count(*) AS stale_tables FROM (SELECT layer, table_name, max(recorded_at) AS last_success\nFROM delta.monitoring.pipeline_metrics WHERE status = 'success' GROUP BY layer, table_name) o\nWHERE date_diff('minute', CAST(o.last_success AS timestamp(3)), CAST(current_timestamp AT TIME ZONE 'UTC' AS timestamp(3))) > 1560"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "description": "Tables whose last successful write is older than 26 h"
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Tables whose last run failed",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT count(*) AS failed_tables FROM (SELECT layer, table_name, status, row_count, write_mode, rows_inserted, rows_updated, rows_deleted, duration_sec,\n    row_number() OVER (PARTITION BY layer, table_name ORDER BY recorded_at DESC) AS rn\nFROM delta.monitoring.pipeline_metrics) l WHERE rn = 1 AND status = 'failed'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "description": ""
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Failed DQ checks (latest run)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT count(*) AS failed_checks FROM delta.monitoring.data_quality_log WHERE NOT passed AND (layer, checked_at) IN (SELECT layer, max(checked_at) FROM delta.monitoring.data_quality_log GROUP BY layer)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "description": ""
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "DQ pass rate",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT round(100.0 * count_if(passed) / count(*), 1) AS pass_rate_pct FROM delta.monitoring.data_quality_log WHERE (layer, checked_at) IN (SELECT layer, max(checked_at) FROM delta.monitoring.data_quality_log GROUP BY layer)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 95
+              },
+              {
+                "color": "green",
+                "value": 99.9
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "description": ""
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Avg job time (24 h)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 21,
+        "y": 1,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT round(avg(duration_sec), 1) AS avg_job_seconds FROM delta.monitoring.pipeline_metrics\nWHERE status = 'success' AND CAST(recorded_at AS timestamp(3)) > date_add('day', -1, CAST(current_timestamp AT TIME ZONE 'UTC' AS timestamp(3)))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "description": ""
+    },
+    {
+      "id": 7,
+      "type": "row",
+      "title": "Freshness",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Table freshness & last write",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT l.layer, l.table_name, o.last_success,\n    date_diff('minute', CAST(o.last_success AS timestamp(3)), CAST(current_timestamp AT TIME ZONE 'UTC' AS timestamp(3))) AS lag_minutes,\n    l.status AS last_status, l.row_count, l.write_mode, l.rows_inserted, l.rows_updated, l.rows_deleted, l.duration_sec\nFROM (SELECT layer, table_name, status, row_count, write_mode, rows_inserted, rows_updated, rows_deleted, duration_sec,\n    row_number() OVER (PARTITION BY layer, table_name ORDER BY recorded_at DESC) AS rn\nFROM delta.monitoring.pipeline_metrics) l\nLEFT JOIN (SELECT layer, table_name, max(recorded_at) AS last_success\nFROM delta.monitoring.pipeline_metrics WHERE status = 'success' GROUP BY layer, table_name) o ON l.layer = o.layer AND l.table_name = o.table_name\nWHERE l.rn = 1\nORDER BY lag_minutes DESC NULLS FIRST"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "lag_minutes"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "m"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 720
+                    },
+                    {
+                      "color": "red",
+                      "value": 1560
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "last_status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "failed": {
+                        "color": "red",
+                        "text": "failed"
+                      },
+                      "success": {
+                        "color": "green",
+                        "text": "success"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 9,
+      "type": "row",
+      "title": "Runs & data quality (30 days)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Job time per day by layer",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 0,
+          "rawSQL": "SELECT CAST(date_trunc('day', CAST(recorded_at AS timestamp(3))) AS timestamp(3)) AS time,\n    round(sum(duration_sec) FILTER (WHERE layer = 'bronze'), 1) AS bronze,\n    round(sum(duration_sec) FILTER (WHERE layer = 'silver'), 1) AS silver,\n    round(sum(duration_sec) FILTER (WHERE layer = 'gold'), 1) AS gold\nFROM delta.monitoring.pipeline_metrics\nWHERE CAST(recorded_at AS timestamp(3)) > date_add('day', -30, CAST(current_timestamp AT TIME ZONE 'UTC' AS timestamp(3))) AND status = 'success'\nGROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "DQ pass rate per day",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 17,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 0,
+          "rawSQL": "SELECT CAST(date_trunc('day', CAST(checked_at AS timestamp(3))) AS timestamp(3)) AS time,\n    round(100.0 * count_if(passed) FILTER (WHERE layer = 'bronze') / nullif(count(*) FILTER (WHERE layer = 'bronze'), 0), 1) AS bronze,\n    round(100.0 * count_if(passed) FILTER (WHERE layer = 'silver') / nullif(count(*) FILTER (WHERE layer = 'silver'), 0), 1) AS silver,\n    round(100.0 * count_if(passed) FILTER (WHERE layer = 'gold') / nullif(count(*) FILTER (WHERE layer = 'gold'), 0), 1) AS gold\nFROM delta.monitoring.data_quality_log\nWHERE CAST(checked_at AS timestamp(3)) > date_add('day', -30, CAST(current_timestamp AT TIME ZONE 'UTC' AS timestamp(3)))\nGROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Silver rows changed per day (MERGE)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 25,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 0,
+          "rawSQL": "SELECT CAST(date_trunc('day', CAST(recorded_at AS timestamp(3))) AS timestamp(3)) AS time,\n    sum(rows_inserted) AS inserted, sum(rows_updated) AS updated, sum(rows_deleted) AS deleted\nFROM delta.monitoring.pipeline_metrics\nWHERE write_mode = 'merge' AND status = 'success' AND CAST(recorded_at AS timestamp(3)) > date_add('day', -30, CAST(current_timestamp AT TIME ZONE 'UTC' AS timestamp(3)))\nGROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "Rows inserted / updated / deleted by the incremental silver MERGE jobs"
+    },
+    {
+      "id": 13,
+      "type": "row",
+      "title": "Failures",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 14,
+      "type": "table",
+      "title": "Failed DQ checks (latest run per layer)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT layer, table_name, check_name, detail, checked_at FROM delta.monitoring.data_quality_log\nWHERE NOT passed AND (layer, checked_at) IN (SELECT layer, max(checked_at) FROM delta.monitoring.data_quality_log GROUP BY layer) ORDER BY layer, table_name"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 15,
+      "type": "table",
+      "title": "Job failures (30 days)",
+      "datasource": {
+        "type": "trino-datasource",
+        "uid": "trino-delta"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 34,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "trino-datasource",
+            "uid": "trino-delta"
+          },
+          "format": 1,
+          "rawSQL": "SELECT recorded_at, layer, table_name, duration_sec, error_message FROM delta.monitoring.pipeline_metrics\nWHERE status = 'failed' AND CAST(recorded_at AS timestamp(3)) > date_add('day', -30, CAST(current_timestamp AT TIME ZONE 'UTC' AS timestamp(3))) ORDER BY recorded_at DESC LIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "description": "Freshness, job durations, merge activity and data-quality results from monitoring.pipeline_metrics / monitoring.data_quality_log"
+}

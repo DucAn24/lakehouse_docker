@@ -31,7 +31,9 @@ from airflow import DAG
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 from airflow.sdk import TaskGroup
 
+from alerting import notify_failure
 from spark_submit_defaults import BRONZE_JOBS, SILVER_JOBS, GOLD_JOBS, OPS_JOBS, common_kwargs, dq_kwargs, register_kwargs
+from monitoring_tasks import finish_with_monitoring
 
 # ---------------------------------------------------------------------------
 # Default task arguments
@@ -41,6 +43,7 @@ DEFAULT_ARGS = {
     "retries": 0,
     "retry_delay": timedelta(minutes=5),
     "execution_timeout": timedelta(hours=2),
+    "on_failure_callback": notify_failure,
 }
 
 
@@ -289,3 +292,5 @@ with DAG(
     )
 
     gold_group >> vacuum_delta_tables
+
+    finish_with_monitoring(vacuum_delta_tables)

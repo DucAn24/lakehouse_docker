@@ -15,7 +15,8 @@ from pyspark.sql.window import Window
 
 from common.config import create_spark_session, get_logger, BRONZE_BUCKET, SILVER_BUCKET
 from common.transforms import extract_cdc_latest
-from common.writers import write_with_metrics
+from common.tables import SILVER_KEYS
+from common.writers import upsert_with_metrics
 
 logger = get_logger("b2s.customers")
 
@@ -115,7 +116,7 @@ def run(spark):
         current_timestamp().alias("processed_at"),
     )
 
-    write_with_metrics(df_silver, spark, "silver", "olist_customers", SILVER_PATH)
+    upsert_with_metrics(df_silver, spark, "silver", "olist_customers", SILVER_PATH, SILVER_KEYS["olist_customers"])
 
 
 if __name__ == "__main__":

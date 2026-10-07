@@ -14,7 +14,8 @@ Spark code layout (`spark/app`, on `PYTHONPATH`):
 
 - `common/` shared package: `config` (session/env), `tables` (single table registry, layer → table → path), `transforms`, `writers`, `catalog`, `metrics`, `quality` (DQ rules).
 - `jobs/bronze/`, `jobs/silver/{olist,clickstream}/`, `jobs/gold/{dimensions,facts}/`: one spark-submit entry point per table, file name = table name. Each layer has `register_tables.py`.
-- `jobs/ops/`: `data_quality.py --layer …`, `vacuum_tables.py`. `scripts/`: ad-hoc, not run by Airflow.
+- `jobs/ops/`: `data_quality.py --layer …`, `vacuum_tables.py`, `register_monitoring.py` (exposes `pipeline_metrics` + `data_quality_log` as `delta.monitoring.*` for the Grafana *Pipeline Monitoring* dashboard/alerts). `scripts/`: ad-hoc, not run by Airflow.
+- Silver jobs write with `upsert_with_metrics(..., SILVER_KEYS[table])` (MERGE + Change Data Feed); gold still uses `write_with_metrics`. New silver table → also add its key to `SILVER_KEYS`.
 - New table → add the job, add it to `common/tables.py` and the rules in `common/quality.py`, add the task in the DAG (paths via `SILVER_JOBS`/`GOLD_JOBS` in `spark_submit_defaults.py`).
 - Import shared code as `from common.x import y`. No Python UDFs today, so executors never import project code; if you add one, ship `common/` with `--py-files`.
 

@@ -7,7 +7,7 @@ table, add it here too.
 
 from __future__ import annotations
 
-from common.config import BRONZE_BUCKET, GOLD_BUCKET, SILVER_BUCKET
+from common.config import BRONZE_BUCKET, GOLD_BUCKET, METRICS_PATH, QUALITY_LOG_PATH, SILVER_BUCKET
 
 # Bronze tables are named after the source table; the Delta folder is the Debezium topic.
 _BRONZE_TOPICS = {
@@ -63,6 +63,25 @@ _GOLD_TABLES = [
     "fact_click_reviews",
 ]
 
+# Business key of each silver table: the MERGE key of `common.writers.upsert_with_metrics`
+# (must stay unique, same columns as the silver DQ `primary_keys`).
+SILVER_KEYS: dict[str, list[str]] = {
+    "olist_customers": ["customer_id"],
+    "olist_sellers": ["seller_id"],
+    "olist_products": ["product_id"],
+    "olist_orders": ["order_id"],
+    "olist_order_items": ["order_id", "order_item_id"],
+    "olist_order_payments": ["order_id", "payment_sequential"],
+    "olist_order_reviews": ["review_id", "order_id"],
+    "click_customers": ["customer_id"],
+    "click_products": ["product_id"],
+    "click_sessions": ["session_id"],
+    "click_orders": ["order_id"],
+    "click_order_items": ["order_id", "product_id"],
+    "click_events": ["event_id"],
+    "click_reviews": ["review_id"],
+}
+
 TABLES: dict[str, dict[str, str]] = {
     "bronze": {name: f"{BRONZE_BUCKET}/{topic}/" for name, topic in _BRONZE_TOPICS.items()},
     "silver": {name: f"{SILVER_BUCKET}/{name}/" for name in _SILVER_TABLES},
@@ -84,3 +103,13 @@ def select_tables(layer: str, table: str | None = None) -> dict[str, str]:
     if table not in tables:
         raise KeyError(f"Unknown {layer} table: {table}")
     return {table: tables[table]}
+
+
+# Pipeline observability Delta tables (written by common.metrics / common.quality), exposed to
+# Trino + Grafana in the `monitoring` schema by jobs/ops/register_monitoring.py. Not a "layer":
+# they have no jobs or DQ rules of their own.
+MONITORING_SCHEMA = "monitoring"
+MONITORING_TABLES: dict[str, str] = {
+    "pipeline_metrics": METRICS_PATH,
+    "data_quality_log": QUALITY_LOG_PATH,
+}

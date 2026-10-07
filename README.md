@@ -105,7 +105,19 @@ Hive Metastore đã được thay bằng **Unity Catalog OSS** (`unitycatalog`, 
 - Plugin `trino-datasource` (pin 1.2.0, cài khi container khởi động — cần internet lần đầu).
 - Datasource `Trino (Delta Lake)` (uid `trino-delta`) → `http://trino:8080`, user `admin`.
 - Dashboard **Lakehouse Overview** (folder *Lakehouse*): Olist (doanh thu theo tháng/bang, top category, review) và Clickstream (funnel, device, country, session). Query lấy từ `api/sql/`, đọc `delta.gold.*` nên cần chạy xong pipeline Airflow trước.
+- Dashboard **Pipeline Monitoring** (uid `lakehouse-monitoring`): bảng nào đã cũ (freshness), job fail, thời gian chạy theo layer, số dòng insert/update/delete của silver MERGE, tỉ lệ DQ pass và danh sách check fail. Đọc `delta.monitoring.pipeline_metrics` / `delta.monitoring.data_quality_log`, được task `register_monitoring` (cuối mỗi DAG) đăng ký vào Trino.
+- Alert rules (`grafana/provisioning/alerting/`): bảng không có lần ghi thành công nào > 26 giờ, job của bảng fail ở lần chạy gần nhất, DQ có check fail. Gửi tới `ALERT_WEBHOOK_URL` (Slack-compatible webhook, đặt trong `.env`).
 - Sửa `grafana/dashboards/*.json` → Grafana tự nạp lại sau ~30 giây (không cần restart).
+
+### Cảnh báo khi pipeline lỗi
+
+Đặt `ALERT_WEBHOOK_URL` trong `.env` (Slack / Mattermost / Discord `/slack`), rồi `docker compose up -d airflow grafana`. Mỗi task Airflow fail sẽ gửi tin (`airflow/dags/alerting.py`, `on_failure_callback`) và Grafana gửi alert rule ở trên. Để trống = tắt cảnh báo; lỗi gửi webhook không ảnh hưởng pipeline. `register_monitoring` chạy cả khi DQ gate fail (trigger rule `all_done`), và task `pipeline_done` giữ nguyên kết quả thật của DAG run.
+
+## Silver incremental (MERGE + Change Data Feed)
+
+Job silver không còn overwrite cả bảng: `upsert_with_metrics` (`common/writers.py`) MERGE kết quả vào bảng hiện có theo business key (`SILVER_KEYS` trong `common/tables.py`, trùng với PK của DQ): key mới → insert, nội dung đổi → update, key biến mất khỏi bronze → delete. Dòng không đổi **không bị ghi lại** và giữ nguyên `processed_at` (cột này giờ nghĩa là "lần cuối dòng thay đổi"). Bảng chưa có hoặc schema đổi → overwrite toàn bộ (schema mới thay schema cũ).
+
+Change Data Feed được bật trên mọi bảng silver, nên job downstream có thể đọc thay đổi theo dòng thay vì quét lại: `read_changes(spark, path, starting_version)` trả về `_change_type` (`insert` / `update_postimage` / `delete`), `_commit_version`, `_commit_timestamp`. Feed bắt đầu từ version mà CDF được bật (lần overwrite đầu không có change record). Mỗi lần ghi, `pipeline_metrics` lưu thêm `write_mode`, `rows_inserted`, `rows_updated`, `rows_deleted`. Bronze vẫn là snapshot overwrite từ Kafka và gold vẫn build lại toàn bộ.
 
 ## Data quality
 
@@ -135,7 +147,7 @@ spark/app/
     config.py                  # SparkSession, env, bucket
     tables.py                  # registry duy nhất: layer → bảng → path (catalog, DQ, vacuum đều đọc từ đây)
     transforms.py              # extract_cdc_latest, safe_to_timestamp, generate_surrogate_key
-    writers.py                 # write_with_metrics
+    writers.py                 # write_with_metrics, upsert_with_metrics (MERGE + CDF), read_changes
     catalog.py                 # đăng ký Unity Catalog + Trino
     metrics.py                 # pipeline metrics
     quality.py                 # framework + rule data quality
@@ -143,7 +155,7 @@ spark/app/
     bronze/      kafka_to_bronze.py, register_tables.py
     silver/      olist/olist_*.py, clickstream/click_*.py, register_tables.py
     gold/        dimensions/dim_*.py, facts/fact_*.py, register_tables.py
-    ops/         data_quality.py, vacuum_tables.py
+    ops/         data_quality.py, vacuum_tables.py, register_monitoring.py
   scripts/                     # tiện ích chạy tay, Airflow không dùng
 ```
 

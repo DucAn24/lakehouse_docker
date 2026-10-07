@@ -4,7 +4,7 @@ from pyspark.sql.functions import col, trim, when, current_timestamp, round as s
 from pyspark.sql.types import DoubleType, IntegerType
 
 from common.config import create_spark_session, get_logger, BRONZE_BUCKET, SILVER_BUCKET
-from common.transforms import safe_to_timestamp
+from common.transforms import extract_cdc_latest, safe_to_timestamp
 from common.tables import SILVER_KEYS
 from common.writers import upsert_with_metrics
 
@@ -16,7 +16,7 @@ SILVER_PATH = f"{SILVER_BUCKET}/olist_order_items/"
 
 def run(spark):
     df = spark.read.format("delta").load(BRONZE_PATH)
-    df_clean = df.filter(col("op") != "d").select("after.*")
+    df_clean = extract_cdc_latest(df, key_cols=["order_id", "order_item_id"])
 
     df_silver = df_clean.select(
         trim(col("order_id")).alias("order_id"),

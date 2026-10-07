@@ -5,6 +5,7 @@ from pyspark.sql.types import DoubleType, IntegerType
 
 from common.config import create_spark_session, get_logger, BRONZE_BUCKET, SILVER_BUCKET
 from common.tables import SILVER_KEYS
+from common.transforms import extract_cdc_latest
 from common.writers import upsert_with_metrics
 
 logger = get_logger("b2s.order_payments")
@@ -15,7 +16,7 @@ SILVER_PATH = f"{SILVER_BUCKET}/olist_order_payments/"
 
 def run(spark):
     df = spark.read.format("delta").load(BRONZE_PATH)
-    df_clean = df.filter(col("op") != "d").select("after.*")
+    df_clean = extract_cdc_latest(df, key_cols=["order_id", "payment_sequential"])
 
     df_silver = df_clean.select(
         trim(col("order_id")).alias("order_id"),

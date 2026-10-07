@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import logging
 import time
+from functools import reduce
+from operator import or_
 
 from delta.tables import DeltaTable
 from pyspark import StorageLevel
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import col, xxhash64
+from pyspark.sql.functions import col
 
 from common.metrics import record_metric
 
@@ -146,7 +148,9 @@ def upsert_with_metrics(
 def _merge(spark: SparkSession, df: DataFrame, path: str, keys: list[str]) -> dict[str, int | None]:
     tracked = [c for c in df.columns if c not in AUDIT_COLUMNS]
     on_keys = " AND ".join(f"t.`{k}` <=> s.`{k}`" for k in keys)
-    changed = xxhash64(*[col(f"t.`{c}`") for c in tracked]) != xxhash64(*[col(f"s.`{c}`") for c in tracked])
+    # Exact per-column comparison: a row hash would miss e.g. (NULL, 1) -> (1, NULL), because
+    # Spark's hash functions skip NULL inputs.
+    changed = reduce(or_, [~col(f"t.`{c}`").eqNullSafe(col(f"s.`{c}`")) for c in tracked])
     target = DeltaTable.forPath(spark, path)
     (
         target.alias("t")

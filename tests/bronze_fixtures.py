@@ -9,6 +9,8 @@ Deliberate edge cases (asserted in test_pipeline_e2e.py):
   - olist_customers c2 / olist_sellers s1: zip code 99999 has no geolocation row (lat/lng stay NULL)
   - olist_products p2: category without an English translation (falls back to the original name)
   - olist_orders o2: not delivered yet (delivery columns NULL)
+  - olist_order_items o1/1, olist_order_payments o1/1, product_category_translation beleza_saude:
+    inserted with a stale value, then updated (silver must keep one row per key: the MERGE key is unique)
 """
 
 from __future__ import annotations
@@ -56,7 +58,10 @@ BRONZE: dict[str, BronzeTable] = {
     ),
     "product_category_translation": (
         ["product_category_name", "product_category_name_english"],
-        [("r", 1, ("beleza_saude", "health_beauty"))],
+        [
+            ("c", 1, ("beleza_saude", "stale_name")),
+            ("u", 2, ("beleza_saude", "health_beauty")),
+        ],
     ),
     "olist_orders": (
         [
@@ -94,7 +99,8 @@ BRONZE: dict[str, BronzeTable] = {
     "olist_order_items": (
         ["order_id", "order_item_id", "product_id", "seller_id", "shipping_limit_date", "price", "freight_value"],
         [
-            ("r", 1, ("o1", "1", "p1", "s1", "2018-01-05 00:00:00", "100.0", "10.0")),
+            ("c", 1, ("o1", "1", "p1", "s1", "2018-01-05 00:00:00", "90.0", "9.0")),
+            ("u", 2, ("o1", "1", "p1", "s1", "2018-01-05 00:00:00", "100.0", "10.0")),
             ("r", 1, ("o1", "2", "p2", "s1", "2018-01-05 00:00:00", "50.0", "5.0")),
             ("r", 1, ("o2", "1", "p1", "s1", "2018-02-05 00:00:00", "20.0", "2.0")),
         ],
@@ -102,7 +108,8 @@ BRONZE: dict[str, BronzeTable] = {
     "olist_order_payments": (
         ["order_id", "payment_sequential", "payment_type", "payment_installments", "payment_value"],
         [
-            ("r", 1, ("o1", "1", "credit_card", "3", "160.0")),
+            ("c", 1, ("o1", "1", "boleto", "1", "150.0")),
+            ("u", 2, ("o1", "1", "credit_card", "3", "160.0")),
             ("r", 1, ("o2", "1", "boleto", "1", "22.0")),
         ],
     ),

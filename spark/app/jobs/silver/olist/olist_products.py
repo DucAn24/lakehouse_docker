@@ -24,7 +24,7 @@ SILVER_PATH = f"{SILVER_BUCKET}/olist_products/"
 
 def _build_category_lookup(spark):
     df = spark.read.format("delta").load(BRONZE_CATEGORY_PATH)
-    df_clean = df.filter(col("op") != "d").select("after.*")
+    df_clean = extract_cdc_latest(df, key_cols=["product_category_name"])
     return df_clean.select(
         trim(col("product_category_name")).alias("cat_name"),
         trim(col("product_category_name_english")).alias("product_category_name_english"),

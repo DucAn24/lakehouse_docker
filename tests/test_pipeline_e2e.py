@@ -73,14 +73,22 @@ def test_jobs_are_idempotent(spark, lake):
     assert lake("silver", "olist_orders").count() == before
 
 
-def test_silver_rerun_is_an_incremental_noop(spark, lake):
-    stamps = {r.order_id: r.processed_at for r in lake("silver", "olist_orders").collect()}
-    _module("silver", "olist_orders").run(spark)
-    assert {r.order_id: r.processed_at for r in lake("silver", "olist_orders").collect()} == stamps
+@pytest.mark.parametrize("table", ["olist_orders", "olist_order_items", "olist_order_payments", "olist_products"])
+def test_silver_rerun_is_an_incremental_noop(spark, lake, table):
+    # the fixtures hold stale + updated CDC events for items / payments / category translations,
+    # so a second run goes through the MERGE with a source that must be unique per key
+    key = SILVER_KEYS[table]
+
+    def stamps():
+        return {tuple(r[k] for k in key): r.processed_at for r in lake("silver", table).collect()}
+
+    before = stamps()
+    _module("silver", table).run(spark)
+    assert stamps() == before
     last = (
         spark.read.format("delta")
         .load(METRICS_PATH)
-        .filter((col("table_name") == "olist_orders") & (col("layer") == "silver"))
+        .filter((col("table_name") == table) & (col("layer") == "silver"))
         .orderBy(col("recorded_at").desc())
         .first()
     )

@@ -82,3 +82,14 @@ def test_duplicate_source_keys_fail_and_are_recorded(spark, tmp_delta):
         _upsert(spark, tmp_delta, [(1, "a", 1), (1, "z", 9)], "dupes")
     assert _metric(spark, "dupes").status == "failed"
     assert [(r.id, r.name) for r in spark.read.format("delta").load(tmp_delta).collect()] == [(1, "a")]
+
+
+def test_swapping_null_between_columns_is_detected_as_a_change(spark, tmp_delta):
+    schema = "id int, a int, b int"
+    first = spark.createDataFrame([(1, None, 1)], schema).withColumn("processed_at", current_timestamp())
+    upsert_with_metrics(first, spark, "silver", "null_swap", tmp_delta, ["id"])
+    second = spark.createDataFrame([(1, 1, None)], schema).withColumn("processed_at", current_timestamp())
+    upsert_with_metrics(second, spark, "silver", "null_swap", tmp_delta, ["id"])
+    (row,) = spark.read.format("delta").load(tmp_delta).collect()
+    assert (row.a, row.b) == (1, None)
+    assert _metric(spark, "null_swap").rows_updated == 1

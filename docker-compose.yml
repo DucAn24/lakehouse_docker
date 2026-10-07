@@ -273,6 +273,7 @@ services:
       AIRFLOW__WEBSERVER__WEB_SERVER_MASTER_TIMEOUT: "300"
       SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-1500m}
       SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-512m}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
     ports: ["8084:8080"]
     volumes:
       - ./airflow/dags:/opt/airflow/dags
@@ -308,10 +309,14 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_INSTALL_PLUGINS: trino-datasource 1.2.0
+      # Slack-compatible webhook for alert rules; the default is a dead address so provisioning
+      # still loads and alerts are only visible in the Grafana UI
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://127.0.0.1:9/alert-webhook-not-configured}
     ports: ["3001:3000"]
     volumes:
       - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/provisioning/alerting:/etc/grafana/provisioning/alerting:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     depends_on:

@@ -15,13 +15,16 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 
+from alerting import notify_failure
 from spark_submit_defaults import GOLD_JOBS, common_kwargs, dq_kwargs, register_kwargs
+from monitoring_tasks import finish_with_monitoring
 
 DEFAULT_ARGS = {
     "owner": "data-engineering",
     "retries": 0,
     "retry_delay": timedelta(minutes=5),
     "execution_timeout": timedelta(hours=2),
+    "on_failure_callback": notify_failure,
 }
 
 
@@ -128,3 +131,5 @@ with DAG(
     dq_gold = SparkSubmitOperator(task_id="dq_gold", **dq_kwargs("gold"))
 
     gold_tasks[-1] >> register_gold_tables >> dq_gold
+
+    finish_with_monitoring(dq_gold)

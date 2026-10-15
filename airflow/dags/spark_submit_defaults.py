@@ -26,13 +26,12 @@ SPARK_PACKAGES = ",".join(
 # ---------------------------------------------------------------------------
 # Job locations (spark/app is bind-mounted at SPARK_APP_DIR)
 #   common/            shared package, imported as `common.*` via PYTHONPATH
-#   jobs/<layer>/...   one spark-submit entry point per table
+#   jobs/<layer>/...   one spark-submit entry point per table (gold tables are dbt models, see gold_tasks.py)
 # ---------------------------------------------------------------------------
 SPARK_APP_DIR = "/opt/spark/app"
 JOBS_DIR = f"{SPARK_APP_DIR}/jobs"
 BRONZE_JOBS = f"{JOBS_DIR}/bronze"
 SILVER_JOBS = f"{JOBS_DIR}/silver"
-GOLD_JOBS = f"{JOBS_DIR}/gold"
 OPS_JOBS = f"{JOBS_DIR}/ops"
 
 # ---------------------------------------------------------------------------

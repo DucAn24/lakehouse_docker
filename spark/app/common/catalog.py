@@ -32,10 +32,10 @@ def _to_s3_uri(path: str) -> str:
     return "s3://" + path.split("://", 1)[1].rstrip("/")
 
 
-def trino_execute(sql: str) -> list[list]:
+def trino_execute(sql: str, url: str = TRINO_URL) -> list[list]:
     """Run one statement via Trino's REST protocol and return all result rows."""
     request = urllib.request.Request(
-        f"{TRINO_URL}/v1/statement",
+        f"{url}/v1/statement",
         data=sql.encode(),
         headers={"X-Trino-User": TRINO_USER},
         method="POST",

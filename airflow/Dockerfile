@@ -13,6 +13,12 @@ ENV PATH="${SPARK_HOME}/bin:${PATH}"
 
 # Copy Spark from the official image (same version as the spark-master/worker image)
 COPY --from=spark-base /opt/spark /opt/spark
+
+# dbt (gold layer) in its own venv: dbt-core's pins clash with Airflow's constraints
+COPY dbt/requirements.txt /tmp/dbt-requirements.txt
+RUN python -m venv /opt/dbt-venv && \
+    /opt/dbt-venv/bin/pip install --no-cache-dir -r /tmp/dbt-requirements.txt && \
+    rm /tmp/dbt-requirements.txt
 USER airflow
 RUN pip install --no-cache-dir apache-airflow-providers-apache-spark
 
@@ -31,3 +37,6 @@ COPY airflow/config /opt/airflow/config
 
 # Copy Spark app code so spark-submit can find the python scripts locally before submitting
 COPY spark/app /opt/spark/app
+
+# dbt project for the gold layer (bind-mounted over in docker-compose.yml)
+COPY dbt /opt/airflow/dbt

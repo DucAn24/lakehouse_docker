@@ -10,7 +10,7 @@ Stage 2 – Bronze → Silver  (runs after the Bronze quality gate)
     Cleans, types, and enriches each domain entity.
 
 Stage 3 – Silver → Gold  (runs after the Silver quality gate)
-    Builds dimension and fact tables for analytics.
+    `dbt build` (repo `dbt/`) builds the dimension and fact tables on Trino and runs their tests.
 
 Each Spark job is submitted to the standalone spark-master via
 SparkSubmitOperator. Airflow must be on the same Docker network
@@ -32,7 +32,8 @@ from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOpe
 from airflow.sdk import TaskGroup
 
 from alerting import notify_failure
-from spark_submit_defaults import BRONZE_JOBS, SILVER_JOBS, GOLD_JOBS, OPS_JOBS, common_kwargs, dq_kwargs, register_kwargs
+from gold_tasks import dbt_build
+from spark_submit_defaults import BRONZE_JOBS, SILVER_JOBS, OPS_JOBS, common_kwargs, dq_kwargs, register_kwargs
 from monitoring_tasks import finish_with_monitoring
 
 # ---------------------------------------------------------------------------
@@ -57,7 +58,7 @@ with DAG(
     start_date=datetime(2024, 1, 1),
     catchup=False,
     default_args=DEFAULT_ARGS,
-    tags=["lakehouse", "spark", "etl", "medallion"],
+    tags=["lakehouse", "spark", "dbt", "etl", "medallion"],
     doc_md=__doc__,
 ) as dag:
     # =========================================================================
@@ -176,109 +177,25 @@ with DAG(
         silver_tasks[-1] >> register_silver_tables >> dq_silver
 
     # =========================================================================
-    # Stage 3: Silver → Gold
+    # Stage 3: Silver → Gold  (dbt on Trino, repo `dbt/`)
     # =========================================================================
     with TaskGroup("silver_to_gold") as gold_group:
-        s2g_dim_date = SparkSubmitOperator(
-            task_id="dim_date",
-            **common_kwargs("S2G_DimDate", f"{GOLD_JOBS}/dimensions/dim_date.py"),
-        )
-        s2g_dim_customer = SparkSubmitOperator(
-            task_id="dim_customer",
-            **common_kwargs("S2G_DimCustomer", f"{GOLD_JOBS}/dimensions/dim_customer.py"),
-        )
-        s2g_dim_seller = SparkSubmitOperator(
-            task_id="dim_seller",
-            **common_kwargs("S2G_DimSeller", f"{GOLD_JOBS}/dimensions/dim_seller.py"),
-        )
-        s2g_dim_product = SparkSubmitOperator(
-            task_id="dim_product",
-            **common_kwargs("S2G_DimProduct", f"{GOLD_JOBS}/dimensions/dim_product.py"),
-        )
-
-        # Clickstream Gold dimensions
-        s2g_dim_device = SparkSubmitOperator(
-            task_id="dim_device",
-            **common_kwargs("S2G_DimDevice", f"{GOLD_JOBS}/dimensions/dim_device.py"),
-        )
-        s2g_dim_traffic_source = SparkSubmitOperator(
-            task_id="dim_traffic_source",
-            **common_kwargs("S2G_DimTrafficSource", f"{GOLD_JOBS}/dimensions/dim_traffic_source.py"),
-        )
-        s2g_dim_click_customer = SparkSubmitOperator(
-            task_id="dim_click_customer",
-            **common_kwargs("S2G_DimClickCustomer", f"{GOLD_JOBS}/dimensions/dim_click_customer.py"),
-        )
-        s2g_dim_click_product = SparkSubmitOperator(
-            task_id="dim_click_product",
-            **common_kwargs("S2G_DimClickProduct", f"{GOLD_JOBS}/dimensions/dim_click_product.py"),
-        )
-
-        # Facts
-        s2g_fact_orders = SparkSubmitOperator(
-            task_id="fact_orders",
-            **common_kwargs("S2G_FactOrders", f"{GOLD_JOBS}/facts/fact_orders.py"),
-        )
-        s2g_fact_reviews = SparkSubmitOperator(
-            task_id="fact_reviews",
-            **common_kwargs("S2G_FactReviews", f"{GOLD_JOBS}/facts/fact_reviews.py"),
-        )
-
-        # Clickstream Facts
-        s2g_fact_click_orders = SparkSubmitOperator(
-            task_id="fact_click_orders",
-            **common_kwargs("S2G_FactClickOrders", f"{GOLD_JOBS}/facts/fact_click_orders.py"),
-        )
-        s2g_fact_sessions = SparkSubmitOperator(
-            task_id="fact_sessions",
-            **common_kwargs("S2G_FactSessions", f"{GOLD_JOBS}/facts/fact_sessions.py"),
-        )
-        s2g_fact_clickstream_events = SparkSubmitOperator(
-            task_id="fact_clickstream_events",
-            **common_kwargs("S2G_FactClickstreamEvents", f"{GOLD_JOBS}/facts/fact_clickstream_events.py"),
-        )
-        s2g_fact_click_reviews = SparkSubmitOperator(
-            task_id="fact_click_reviews",
-            **common_kwargs("S2G_FactClickReviews", f"{GOLD_JOBS}/facts/fact_click_reviews.py"),
-        )
+        dbt_build_gold = dbt_build()
 
         register_gold_tables = SparkSubmitOperator(
             task_id="register_gold_tables",
             **register_kwargs("gold"),
         )
 
-        # Run the gold Spark jobs sequentially.
-        gold_tasks = [
-            s2g_dim_date,
-            s2g_dim_customer,
-            s2g_dim_seller,
-            s2g_dim_product,
-            # Clickstream dimensions
-            s2g_dim_device,
-            s2g_dim_traffic_source,
-            s2g_dim_click_customer,
-            s2g_dim_click_product,
-            # Facts
-            s2g_fact_orders,
-            s2g_fact_reviews,
-            s2g_fact_click_orders,
-            s2g_fact_sessions,
-            s2g_fact_clickstream_events,
-            s2g_fact_click_reviews,
-        ]
-
-        for current_task, next_task in zip(gold_tasks, gold_tasks[1:]):
-            current_task >> next_task
-
         dq_gold = SparkSubmitOperator(task_id="dq_gold", **dq_kwargs("gold"))
 
-        gold_tasks[-1] >> register_gold_tables >> dq_gold
+        dbt_build_gold >> register_gold_tables >> dq_gold
 
     # =========================================================================
     # Cross-group dependencies
     # =========================================================================
     dq_bronze >> silver_tasks[0]
-    dq_silver >> gold_tasks[0]
+    dq_silver >> dbt_build_gold
 
     # =========================================================================
     # Stage 4: Vacuum / Cleanup (Giúp giải phóng ổ cứng)

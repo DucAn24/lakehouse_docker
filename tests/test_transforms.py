@@ -6,7 +6,7 @@ import pytest
 from pyspark.sql.functions import col, date_format
 
 from common.metrics import record_metric
-from common.transforms import extract_cdc_latest, generate_surrogate_key, safe_to_timestamp
+from common.transforms import extract_cdc_latest, safe_to_timestamp
 from common.writers import write_with_metrics
 
 
@@ -54,13 +54,6 @@ def test_extract_cdc_latest_one_row_per_key(spark):
     df = _cdc(spark, [("c", 1, "a", "v1"), ("u", 2, "a", "v2"), ("u", 3, "a", "v3")])
     rows = extract_cdc_latest(df, key_cols=["id"]).collect()
     assert [(r.id, r.value) for r in rows] == [("a", "v3")]
-
-
-def test_generate_surrogate_key_is_unique_and_starts_at_one(spark):
-    df = generate_surrogate_key(spark.range(50).toDF("n"), "sk")
-    keys = [r.sk for r in df.collect()]
-    assert len(set(keys)) == 50
-    assert min(keys) >= 1
 
 
 def test_write_with_metrics_writes_data_and_records_success(spark, tmp_delta):

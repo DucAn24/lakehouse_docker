@@ -1,4 +1,4 @@
-"""Reusable DataFrame transforms: CDC dedup, timestamp parsing, surrogate keys."""
+"""Reusable DataFrame transforms: CDC dedup, timestamp parsing."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from pyspark.sql.functions import (
     col,
     desc,
     from_unixtime,
-    monotonically_increasing_id,
     row_number,
     when,
 )
@@ -24,11 +23,6 @@ def safe_to_timestamp(column):
     ).otherwise(
         column.cast(TimestampType()),
     )
-
-
-def generate_surrogate_key(df: DataFrame, key_column_name: str = "sk") -> DataFrame:
-    """Add an auto-incrementing surrogate key column starting from 1."""
-    return df.withColumn(key_column_name, monotonically_increasing_id() + 1)
 
 
 def extract_cdc_latest(

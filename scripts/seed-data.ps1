@@ -1,5 +1,5 @@
 # Seed dữ liệu Olist + Clickstream vào PostgreSQL (Docker Compose)
-# Dataset được mount read-only vào postgres:/data, Script/ vào postgres:/sql
+# Dataset được mount read-only vào postgres:/data, postgres/sql/ vào postgres:/sql
 # Chạy từ thư mục lakehouse_docker:  .\scripts\seed-data.ps1
 
 $ErrorActionPreference = "Stop"

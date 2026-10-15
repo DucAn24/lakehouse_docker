@@ -8,13 +8,13 @@ Standalone Docker Compose port of the K3s/Helm lakehouse in the parent repo. Sam
 - **Code is bind-mounted** (`spark/app`, `airflow/dags`, `dbt/`, `api/`): edits apply without rebuild. Only Dockerfile / `requirements.txt` changes need `docker compose build <svc>`.
 - Secrets live in `.env` (gitignored); `.env.example` must keep placeholders (`MIMO_API_KEY=YOUR_MIMO_API_KEY`).
 - Code here is a copy of the parent repo's `spark/`, `airflow/`, `api/` — changes are NOT synced between the two.
-- Ops scripts: `scripts/seed-data.ps1`, `scripts/register-connectors.ps1`. Windows host: `curl.exe`, PowerShell.
+- Ops scripts (all in root `scripts/`): `scripts/seed-data.ps1`, `scripts/register-connectors.ps1`. Windows host: `curl.exe`, PowerShell.
 
 Spark code layout (`spark/app`, on `PYTHONPATH`):
 
 - `common/` shared package: `config` (session/env), `tables` (single table registry, layer → table → path), `transforms`, `writers`, `catalog`, `metrics`, `quality` (DQ rules).
 - `jobs/bronze/`, `jobs/silver/{olist,clickstream}/`: one spark-submit entry point per table, file name = table name. Each layer (gold too) has `register_tables.py`.
-- `jobs/ops/`: `data_quality.py --layer …`, `vacuum_tables.py`, `register_monitoring.py` (exposes `pipeline_metrics` + `data_quality_log` as `delta.monitoring.*` for the Grafana *Pipeline Monitoring* dashboard/alerts). `scripts/`: ad-hoc, not run by Airflow.
+- `jobs/ops/`: `data_quality.py --layer …`, `vacuum_tables.py`, `register_monitoring.py` (exposes `pipeline_metrics` + `data_quality_log` as `delta.monitoring.*` for the Grafana *Pipeline Monitoring* dashboard/alerts). `jobs/ops/show_customers.py` is ad-hoc, not run by Airflow. Postgres seed SQL: `postgres/sql/`.
 - Silver jobs write with `upsert_with_metrics(..., SILVER_KEYS[table])` (MERGE + Change Data Feed). New silver table → also add its key to `SILVER_KEYS`.
 - New silver table → add the job, add it to `common/tables.py` and the rules in `common/quality.py`, add the task in the DAG (paths via `SILVER_JOBS` in `spark_submit_defaults.py`).
 - Import shared code as `from common.x import y`. No Python UDFs today, so executors never import project code; if you add one, ship `common/` with `--py-files`.

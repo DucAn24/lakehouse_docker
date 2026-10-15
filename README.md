@@ -523,7 +523,8 @@ lakehouse_docker/
 │   ├── dashboards/            # Pre-provisioned Grafana dashboards (.json)
 │   └── provisioning/          # Datasource, dashboard & alert rule provisioning
 ├── postgres/
-│   └── init-databases.sh      # Initializes orders, airflow, metabase databases
+│   ├── init-databases.sh      # Initializes orders, airflow, metabase databases
+│   └── sql/                   # Schema + import SQL, mounted at postgres:/sql (used by seed-data.ps1)
 ├── scripts/
 │   ├── check_dags.py          # Verifies Airflow DAG structure and imports
 │   ├── check_spark_layout.py  # Verifies registry, DQ rules, and file layout

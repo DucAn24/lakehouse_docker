@@ -6,11 +6,14 @@ import ast
 from pathlib import Path
 
 import pytest
+import yaml
 
 from common.tables import LAYERS, TABLES, select_tables, table_path
 
-APP = Path(__file__).resolve().parents[1] / "spark" / "app"
+ROOT = Path(__file__).resolve().parents[1]
+APP = ROOT / "spark" / "app"
 JOBS = APP / "jobs"
+DBT = ROOT / "dbt"
 
 
 def job_file(layer: str, table: str) -> Path:
@@ -43,23 +46,32 @@ def test_select_tables():
         select_tables("gold", "nope")
 
 
-@pytest.mark.parametrize("layer", ["silver", "gold"])
-def test_every_table_has_one_job_with_entrypoint(layer):
-    for table in TABLES[layer]:
-        tree = ast.parse(job_file(layer, table).read_text(encoding="utf-8"))
+def test_every_silver_table_has_one_job_with_entrypoint():
+    for table in TABLES["silver"]:
+        tree = ast.parse(job_file("silver", table).read_text(encoding="utf-8"))
         funcs = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
-        assert "run" in funcs, f"{layer}/{table}: no run(spark)"
+        assert "run" in funcs, f"silver/{table}: no run(spark)"
         guards = [n for n in tree.body if isinstance(n, ast.If) and "__main__" in ast.unparse(n.test)]
-        assert guards, f"{layer}/{table}: no __main__ entry point for spark-submit"
+        assert guards, f"silver/{table}: no __main__ entry point for spark-submit"
 
 
-@pytest.mark.parametrize("layer", ["silver", "gold"])
-def test_job_paths_match_registry(layer):
+def test_silver_job_paths_match_registry():
     """The path a job writes must be the path the registry (catalog, DQ, VACUUM) uses."""
-    for table, path in TABLES[layer].items():
-        source = job_file(layer, table).read_text(encoding="utf-8")
+    for table, path in TABLES["silver"].items():
+        source = job_file("silver", table).read_text(encoding="utf-8")
         suffix = path.rsplit("/", 2)[-2]  # table folder name
-        assert f"/{suffix}/" in source, f"{layer}/{table}: job does not write to {suffix}/"
+        assert f"/{suffix}/" in source, f"silver/{table}: job does not write to {suffix}/"
+
+
+def test_every_gold_table_is_a_dbt_model_at_its_registry_path():
+    """dbt pins each model to <gold_location>/<model name> (macro gold_properties), the registry's gold path."""
+    gold_location = yaml.safe_load((DBT / "dbt_project.yml").read_text(encoding="utf-8"))["vars"]["gold_location"]
+    assert gold_location == "s3://gold"  # same bucket as common.config.GOLD_BUCKET (s3a://gold)
+    models = {p.stem: p for p in (DBT / "models").rglob("*.sql")}
+    assert set(models) == set(TABLES["gold"])
+    for table, path in TABLES["gold"].items():
+        assert path.rstrip("/").rsplit("/", 1)[-1] == table
+        assert "properties=gold_properties()" in models[table].read_text(encoding="utf-8"), table
 
 
 @pytest.mark.parametrize("layer", LAYERS)

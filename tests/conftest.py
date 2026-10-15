@@ -4,6 +4,7 @@ Spark-backed tests run a local Spark session with Delta against a temp "lake" di
 of MinIO: the bucket env vars are set *before* `common.config` is imported, so every job and the
 table registry resolve their paths under that directory. They are skipped when Java or
 delta-spark is missing; run them with `pip install -r tests/requirements.txt` and a JDK 17+.
+The dbt gold models additionally need Docker (fixture `trino_lake`).
 """
 
 from __future__ import annotations
@@ -55,6 +56,22 @@ def spark():
     session.sparkContext.setLogLevel("ERROR")
     yield session
     session.stop()
+
+
+@pytest.fixture(scope="session")
+def trino_lake():
+    """MinIO + Trino containers that run the dbt gold models over LAKE (see trino_lake.py)."""
+    pytest.importorskip("dbt.adapters.trino", reason="dbt-trino not installed")
+    from trino_lake import TrinoLake, docker_available
+
+    if not docker_available():
+        pytest.skip("Docker not available (the dbt gold models run on Trino + MinIO containers)")
+    lake = TrinoLake(LAKE)
+    try:
+        lake.start()
+        yield lake
+    finally:
+        lake.stop()
 
 
 @pytest.fixture()

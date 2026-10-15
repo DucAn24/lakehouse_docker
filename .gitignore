@@ -2,3 +2,7 @@
 __pycache__/
 *.py[cod]
 dataset/
+# dbt run artifacts
+dbt/target/
+dbt/logs/
+dbt/.user.yml

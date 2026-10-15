@@ -278,6 +278,7 @@ services:
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./spark/app:/opt/spark/app
+      - ./dbt:/opt/airflow/dbt
     depends_on:
       postgres: { condition: service_healthy }
       spark-master: { condition: service_started }

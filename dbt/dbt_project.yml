@@ -1,0 +1,28 @@
+# Gold layer: Kimball star schema built from the silver Delta tables with dbt on Trino.
+#   dbt build --project-dir dbt --profiles-dir dbt     (models + their tests, in DAG order)
+name: lakehouse
+version: "1.0.0"
+profile: lakehouse
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+clean-targets: ["target", "logs"]
+
+flags:
+  send_anonymous_usage_stats: false
+
+vars:
+  # Root of the gold Delta tables. Every model is pinned to <gold_location>/<model name>, the path
+  # common/tables.py registers in Unity Catalog and the DQ / VACUUM jobs read. Tests use local:///gold.
+  gold_location: "s3://gold"
+
+models:
+  lakehouse:
+    +materialized: table
+    # CREATE OR REPLACE TABLE: an atomic new Delta version at the same location (keeps time travel),
+    # instead of dbt's default create-tmp-then-rename, which cannot reuse a fixed location.
+    +on_table_exists: replace
+
+on-run-end:
+  - "{{ record_run_metrics(results) }}"

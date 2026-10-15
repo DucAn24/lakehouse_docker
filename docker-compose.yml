@@ -356,6 +356,7 @@ services:
     ports: ["8000:8000"]
     volumes:
       - ./api:/app
+      - ./dbt/models:/dbt/models:ro  # table/column docs + FKs for the chatbot's schema prompt
     depends_on:
       - trino
     mem_limit: ${FASTAPI_MEM_LIMIT:-512m}

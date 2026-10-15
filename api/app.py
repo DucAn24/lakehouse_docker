@@ -1,6 +1,7 @@
 import logging
 import os
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 import time
 from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,8 +42,19 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     conversation_id: str = Field(default="default", min_length=1, max_length=128)
 
+class QueryResult(BaseModel):
+    """One query the chatbot ran: what the UI needs to render SQL, table and chart."""
+    sql: str
+    columns: List[str]
+    rows: List[Dict[str, Any]]
+    row_count: int
+    truncated: bool = False
+    execution_ms: Optional[int] = None
+    chart: Optional[Dict[str, Any]] = None
+
 class ChatResponse(BaseModel):
     response: str
+    queries: List[QueryResult] = []
     timestamp: str
     conversation_id: str
 
@@ -127,10 +139,11 @@ async def chat_with_bot(request: ChatRequest):
     try:
         logger.info(f"Chat request received: {request.message[:50]}...")
         chatbot = get_chatbot()
-        response = chatbot.chat(request.message, request.conversation_id)
+        response, queries = chatbot.chat(request.message, request.conversation_id)
         logger.info("Chat response generated successfully")
         return ChatResponse(
             response=response,
+            queries=queries,
             timestamp=datetime.now().isoformat(),
             conversation_id=request.conversation_id,
         )

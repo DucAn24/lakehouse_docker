@@ -10,6 +10,8 @@ Standalone Docker Compose port of the K3s/Helm lakehouse in the parent repo. Sam
 - Code here is a copy of the parent repo's `spark/`, `airflow/`, `api/` — changes are NOT synced between the two.
 - Ops scripts (all in root `scripts/`): `scripts/seed-data.ps1`, `scripts/register-connectors.ps1`. Windows host: `curl.exe`, PowerShell.
 
+Chatbot (`api/core/chatbot.py`, `--profile apps`): the schema in the system prompt is built at runtime by `core/schema_context.py` (Trino `DESCRIBE` + descriptions/FKs from `dbt/models/*.yml`, mounted read-only at `/dbt/models`; cached 10 min), so a new gold model needs no prompt edit. `run_select_query` validates with `EXPLAIN (TYPE VALIDATE)` and returns Trino's error plus the real columns so the model can self-correct (3 failures per request, then it stops). `/chat` returns `queries` (sql, rows, chart hint from `core/charts.py`) next to the text; the UI renders SQL/chart/table from them.
+
 Spark code layout (`spark/app`, on `PYTHONPATH`):
 
 - `common/` shared package: `config` (session/env), `tables` (single table registry, layer → table → path), `transforms`, `writers`, `catalog`, `metrics`, `quality` (DQ rules).

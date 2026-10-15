@@ -935,6 +935,15 @@
             .sql-editor-layout { flex-direction: column; }
 
         }
+
+        /* ── Structured query results (SQL / chart / table under a chat answer) ── */
+        .qr { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+        .qr-wrap { max-height: 320px; overflow: auto; }
+        .qr-meta { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+        .qr-chart { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+        .qr-metric { font-size: 32px; font-weight: 700; color: var(--accent); }
+        .qr-metric small { display: block; font-size: 12px; font-weight: 500; color: var(--text-muted); }
+        .qr-canvas { position: relative; height: 280px; }
     </style>
 </head>
 <body>
@@ -1043,6 +1052,7 @@
         </div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <script>
         const API_BASE = window.location.origin;
         const chatContainer = document.getElementById('chat-container');
@@ -1059,7 +1069,7 @@
 
         // ── localStorage helpers ──
         function saveConversations() {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations)); } catch (e) { console.warn('Could not save chats:', e); }
         }
 
         function loadConversations() {
@@ -1235,7 +1245,7 @@
 
             chatContainer.innerHTML = '';
             for (const msg of conv.messages) {
-                appendMessageBubble(msg.content, msg.role, false);
+                appendMessageBubble(msg.content, msg.role, false, msg.queries);
             }
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
@@ -1257,7 +1267,7 @@
         }
 
         // ── Message rendering ──
-        function appendMessageBubble(content, role, animate = true) {
+        function appendMessageBubble(content, role, animate = true, queries = []) {
             // Remove welcome if present
             const welcome = chatContainer.querySelector('.welcome');
             if (welcome) welcome.remove();
@@ -1271,10 +1281,11 @@
 
             messageDiv.innerHTML = `
                 <div class="avatar">${avatar}</div>
-                <div class="message-content">${formattedContent}</div>
+                <div class="message-content">${formattedContent}${renderQueryResults(queries)}</div>
             `;
 
             chatContainer.appendChild(messageDiv);
+            drawCharts(messageDiv);
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
@@ -1455,6 +1466,81 @@
             return content;
         }
 
+        // ── Structured query results ──
+        function fmtCell(v) {
+            if (v === null || v === undefined) return '<span style="color:var(--text-muted)">NULL</span>';
+            if (typeof v === 'number') return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+            return escapeHtmlVal(String(v));
+        }
+
+        const chartSpecs = [];
+        const CHART_COLORS = ['#6366f1', '#22d3ee', '#f59e0b', '#10b981', '#f43f5e', '#a78bfa', '#84cc16', '#fb923c'];
+
+        function renderChart(q) {
+            const c = q.chart;
+            if (!c) return '';
+            if (c.type === 'metric') {
+                return `<div class="qr-chart"><div class="qr-metric">${fmtCell(c.value)}<small>${escapeHtmlVal(c.label)}</small></div></div>`;
+            }
+            if (typeof Chart === 'undefined') return '';  // CDN blocked: the table below still works
+            chartSpecs.push(c);
+            return `<div class="qr-chart"><div class="qr-canvas"><canvas data-chart="${chartSpecs.length - 1}"></canvas></div></div>`;
+        }
+
+        function drawCharts(root) {
+            if (typeof Chart === 'undefined') return;
+            root.querySelectorAll('canvas[data-chart]').forEach(canvas => {
+                const c = chartSpecs[Number(canvas.dataset.chart)];
+                if (!c || Chart.getChart(canvas)) return;
+                const pie = c.type === 'pie', line = c.type === 'line', stacked = c.type === 'stacked_bar';
+                const datasets = c.datasets.map((d, i) => ({
+                    label: d.label,
+                    data: d.data,
+                    backgroundColor: pie ? c.labels.map((_, k) => CHART_COLORS[k % CHART_COLORS.length]) : CHART_COLORS[i % CHART_COLORS.length],
+                    borderColor: pie ? '#12121a' : CHART_COLORS[i % CHART_COLORS.length],
+                    borderWidth: line ? 2 : (pie ? 2 : 0),
+                    tension: 0.3,
+                    pointRadius: c.labels.length > 40 ? 0 : 3,
+                    fill: false,
+                    borderRadius: line || pie ? 0 : 4,
+                }));
+                new Chart(canvas, {
+                    type: pie ? 'pie' : (line ? 'line' : 'bar'),
+                    data: { labels: c.labels, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 400 },
+                        plugins: {
+                            legend: { display: pie || datasets.length > 1, position: pie ? 'right' : 'top' },
+                            tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label || ctx.label}: ${fmtCell(ctx.parsed.y ?? ctx.parsed).replace(/<[^>]+>/g, '')}` } },
+                        },
+                        scales: pie ? {} : {
+                            x: { stacked, grid: { display: false }, ticks: { maxRotation: 45, autoSkip: true } },
+                            y: { stacked, beginAtZero: !line, grid: { color: 'rgba(148,163,184,0.12)' } },
+                        },
+                    },
+                });
+            });
+        }
+
+        function renderQueryResults(queries) {
+            return (queries || []).map(q => {
+                const head = q.columns.map(col => `<th>${escapeHtmlVal(col)}</th>`).join('');
+                const body = q.rows.map(r => '<tr>' + q.columns.map(col => `<td>${fmtCell(r[col])}</td>`).join('') + '</tr>').join('');
+                const shown = q.truncated ? ` (showing first ${q.rows.length})` : '';
+                return `<div class="qr">
+                    <details class="sql-details">
+                        <summary><span>View Executed Trino SQL Query</span></summary>
+                        <div class="sql-body"><pre><code>${escapeHtmlVal(q.sql)}</code></pre></div>
+                    </details>
+                    ${renderChart(q)}
+                    ${q.rows.length ? `<div class="table-container qr-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>` : ''}
+                    <div class="qr-meta">${q.row_count} row${q.row_count === 1 ? '' : 's'}${shown}${q.execution_ms != null ? ' · ' + q.execution_ms + ' ms' : ''}</div>
+                </div>`;
+            }).join('');
+        }
+
         // ── Typing indicator ──
         function showTyping() {
             const typingDiv = document.createElement('div');
@@ -1538,11 +1624,13 @@
                     : ('Sorry, an error occurred: ' + (data.detail || 'Unknown error'));
 
                 // Save assistant message
-                conv.messages.push({ role: 'assistant', content: assistantMsg });
+                const queries = response.ok ? (data.queries || []) : [];
+                const stored = queries.map(q => ({ ...q, rows: q.rows.slice(0, 50), truncated: q.truncated || q.rows.length > 50 }));
+                conv.messages.push({ role: 'assistant', content: assistantMsg, queries: stored });
                 conv.updatedAt = new Date().toISOString();
                 saveConversations();
 
-                appendMessageBubble(assistantMsg, 'assistant');
+                appendMessageBubble(assistantMsg, 'assistant', true, queries);
             } catch (error) {
                 hideTyping();
                 console.error('Fetch error:', error);

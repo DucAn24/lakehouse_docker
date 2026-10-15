@@ -24,8 +24,8 @@ from common.catalog import trino_execute
 ROOT = Path(__file__).resolve().parents[1]
 DBT_PROJECT = ROOT / "dbt"
 TRINO_IMAGE = "trinodb/trino:483"  # same as docker-compose.yml
-MINIO_IMAGE = "minio/minio:latest"
-MC_IMAGE = "minio/mc:latest"
+MINIO_IMAGE = "pgsty/minio:RELEASE.2026-08-04T00-00-00Z"
+MC_IMAGE = "pgsty/mc:RELEASE.2026-09-16T00-00-00Z"
 MINIO_USER, MINIO_PASSWORD = "admin", "password123"  # hard-coded in trino/catalog/delta.properties
 BUCKETS = ("silver", "gold", "trino-metastore")
 

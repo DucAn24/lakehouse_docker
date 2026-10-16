@@ -4,8 +4,8 @@ Standalone Docker Compose port of the K3s/Helm lakehouse in the parent repo. Sam
 
 - `docker-compose.yml` replaces `helm/lakehouse`. Service names = the old K8s service names (`postgres`, `minio`, `kafka`, `connect`, `trino`, `spark-master`, `airflow`), so no hostnames in code changed.
 - Catalog: Unity Catalog OSS (`unitycatalog`, catalog `lakehouse`) replaced Hive Metastore. Spark 4.0.4 / Delta 4.0.1 / `unitycatalog-spark_4.0_2.13:0.6.0`. Trino can't read Delta from UC OSS, so its `delta` catalog uses a file metastore on `s3://trino-metastore/`; `common.catalog.register_catalog_tables` registers every table in both. UC only accepts `s3://` locations (not `s3a://`).
-- Core stack by default; `--profile apps` adds metabase, grafana, kafka-ui, fastapi.
-- **Code is bind-mounted** (`spark/app`, `airflow/dags`, `dbt/`, `api/`): edits apply without rebuild. Only Dockerfile / `requirements.txt` changes need `docker compose build <svc>`.
+- Core stack by default; `--profile apps` adds metabase, grafana, kafka-ui, fastapi, catalog-api, portal.
+- **Code is bind-mounted** (`spark/app`, `airflow/dags`, `dbt/`, `api/`, `catalog-api/`): edits apply without rebuild. Only Dockerfile / `requirements.txt` changes need `docker compose build <svc>`.
 - Secrets live in `.env` (gitignored); `.env.example` must keep placeholders (`MIMO_API_KEY=YOUR_MIMO_API_KEY`).
 - Code here is a copy of the parent repo's `spark/`, `airflow/`, `api/` — changes are NOT synced between the two.
 - Ops scripts (all in root `scripts/`): `scripts/seed-data.ps1`, `scripts/register-connectors.ps1`. Windows host: `curl.exe`, PowerShell.
@@ -33,7 +33,7 @@ Verify:
 
 ```bash
 docker compose config -q
-ruff check api/ airflow/dags/ spark/app/ scripts/
+ruff check api/ airflow/dags/ spark/app/ scripts/ catalog-api/
 python scripts/check_spark_layout.py   # imports, DAG job paths, table registry vs DQ rules
 find spark/app -name '*.py' -exec python -m py_compile {} +
 pip install -r tests/requirements.txt && python -m pytest tests   # needs JDK 17+ (Spark) and Docker (dbt gold); those tests skip otherwise

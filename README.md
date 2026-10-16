@@ -32,6 +32,7 @@ This repository provides an autonomous, developer-friendly **Docker Compose** im
   - [3. Dual-Catalog Architecture & STS Credential Vending](#3-dual-catalog-architecture--sts-credential-vending)
   - [4. Observability & Webhook Alerting](#4-observability--webhook-alerting)
   - [5. Natural Language Analytics Chatbot](#5-natural-language-analytics-chatbot)
+  - [6. Unified Data Portal & Interactive Lineage](#6-unified-data-portal--interactive-lineage)
 - [Services & Port Matrix](#-services--port-matrix)
 - [Getting Started](#-getting-started)
   - [Prerequisites](#prerequisites)
@@ -272,6 +273,14 @@ An integrated AI assistant running under the `apps` profile:
 - Translates natural language questions into valid Trino SQL targeting `delta.gold.*` tables.
 - Validates queries, enforces `SELECT`-only execution, and formats executive business summaries with tabular data.
 
+### 6. Unified Data Portal & Interactive Lineage
+
+A modern single-page web portal running on port `3002` under the `apps` profile ([`portal/`](file:///d:/Projects/lakehouse_docker/portal)):
+- **Data Catalog**: Searchable table directory across Bronze, Silver, and Gold layers with metadata, descriptions, primary keys, and data quality pass/fail scores.
+- **Table Inspector**: Detailed column schema, data types, foreign key relationships, live row counts, and sample data.
+- **Interactive DAG Lineage**: Visual React Flow graph mapping data progression from PostgreSQL sources → Debezium CDC → Bronze Delta → Silver Domain Entities → Gold Dimensions & Facts.
+- **Embedded LakeBot**: Conversational analytics interface with real-time Chart.js visualizer, syntax-highlighted SQL blocks, and one-click query execution.
+
 ---
 
 ## 🖥️ Services & Port Matrix
@@ -289,8 +298,10 @@ An integrated AI assistant running under the `apps` profile:
 | **Apache Kafka** | `localhost:29092` | `9092` | KRaft distributed event broker | — |
 | **Metabase** *(apps)* | [localhost:3000](http://localhost:3000) | `3000` | Business intelligence & visualizations | Initial setup on first visit |
 | **Grafana** *(apps)* | [localhost:3001](http://localhost:3001) | `3000` | Pre-provisioned dashboards & alerts | `admin` / `admin` |
+| **Lakehouse Portal** *(apps)* | [localhost:3002](http://localhost:3002) | `80` | Unified catalog, interactive lineage & LakeBot | — |
+| **Catalog API** *(apps)* | [localhost:8087](http://localhost:8087) | `8000` | Metadata catalog, lineage & search API | — |
 | **Kafka UI** *(apps)* | [localhost:8085](http://localhost:8085) | `8080` | Topic message & consumer inspector | — |
-| **FastAPI / Chatbot** *(apps)* | [localhost:8000](http://localhost:8000) | `8000` | SQL API & MiMo AI query assistant | — |
+| **FastAPI / Chatbot** *(apps)* | [localhost:8000](http://localhost:8000) (API only, UI is in the portal) | `8000` | SQL API & MiMo AI query assistant | — |
 
 ---
 
@@ -515,8 +526,7 @@ lakehouse_docker/
 ├── api/
 │   ├── Dockerfile             # FastAPI container image
 │   ├── app.py                 # FastAPI application with MiMo AI Chatbot
-│   ├── core/                  # Trino client & Chatbot LLM orchestrator
-│   └── static/                # Modern dark-mode web interface
+│   └── core/                  # Trino client & Chatbot LLM orchestrator
 ├── connectors/                # Debezium PostgreSQL connector definitions (.json)
 ├── dbt/                       # Gold layer: dbt-trino project (models, tests, macros), bound to /opt/airflow/dbt
 ├── grafana/

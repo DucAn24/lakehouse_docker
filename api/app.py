@@ -1,12 +1,9 @@
 import logging
-import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 import time
 from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from core import execute_sql_with_filters, get_sql_schema, execute_raw_query
@@ -29,14 +26,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-
-@app.get("/")
-async def root():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
@@ -181,6 +170,21 @@ async def get_chat_history(conversation_id: str = Query("default", min_length=1,
         "history": chatbot.get_history(conversation_id),
         "conversation_id": conversation_id,
         "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.get("/chat/suggestions")
+async def get_chat_suggestions():
+    return {
+        "suggestions": [
+            "What's the total revenue?",
+            "Show me the top 5 product categories by sales",
+            "How many customers do we have?",
+            "Show conversion funnel analysis",
+            "Revenue breakdown by device type",
+            "What's the average review score?",
+        ],
+        "timestamp": datetime.now().isoformat(),
     }
 
 

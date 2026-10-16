@@ -1,0 +1,239 @@
+/* ============================================================
+   Lakehouse Portal — Design System
+   Dark theme, glassmorphism, cyan/violet accent gradient
+   ============================================================ */
+
+:root {
+  /* Backgrounds */
+  --bg-deepest:    #060a14;
+  --bg-deep:       #0a0f1e;
+  --bg-surface:    #111827;
+  --bg-card:       #1a2236;
+  --bg-card-hover: #1f2a40;
+  --bg-elevated:   #243049;
+
+  /* Glass */
+  --glass-bg:      rgba(17, 24, 39, 0.7);
+  --glass-border:  rgba(99, 179, 237, 0.12);
+  --glass-blur:    12px;
+
+  /* Accents */
+  --accent-cyan:   #00d4ff;
+  --accent-violet: #7c3aed;
+  --accent-green:  #10b981;
+  --accent-amber:  #f59e0b;
+  --accent-red:    #ef4444;
+  --accent-gradient: linear-gradient(135deg, var(--accent-cyan), var(--accent-violet));
+
+  /* Text */
+  --text-primary:   #f0f4f8;
+  --text-secondary: #94a3b8;
+  --text-muted:     #64748b;
+  --text-accent:    var(--accent-cyan);
+
+  /* Borders */
+  --border-subtle:  rgba(148, 163, 184, 0.1);
+  --border-default: rgba(148, 163, 184, 0.15);
+  --border-accent:  rgba(0, 212, 255, 0.3);
+
+  /* Radius */
+  --radius-sm:  6px;
+  --radius-md:  10px;
+  --radius-lg:  16px;
+  --radius-xl:  20px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.4);
+  --shadow-md:  0 4px 14px rgba(0,0,0,0.5);
+  --shadow-lg:  0 8px 30px rgba(0,0,0,0.6);
+  --shadow-glow: 0 0 20px rgba(0, 212, 255, 0.15);
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-base: 250ms ease;
+  --transition-slow: 400ms ease;
+
+  /* Fonts */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Layout */
+  --sidebar-width: 260px;
+}
+
+/* ============================================================
+   Reset & Base
+   ============================================================ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-deepest);
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+#root {
+  display: flex;
+  min-height: 100vh;
+}
+
+a {
+  color: var(--accent-cyan);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+a:hover { color: var(--accent-violet); }
+
+code, pre {
+  font-family: var(--font-mono);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(148,163,184,0.2);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.35); }
+
+/* ============================================================
+   Utilities
+   ============================================================ */
+
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.gradient-text {
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.badge-bronze { background: rgba(205, 127, 50, 0.15); color: #cd7f32; }
+.badge-silver { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
+.badge-gold   { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.badge-source { background: rgba(124, 58, 237, 0.15); color: var(--accent-violet); }
+.badge-success { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
+.badge-warning { background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); }
+.badge-danger  { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow-glow);
+}
+
+.btn-primary {
+  background: var(--accent-gradient);
+  border: none;
+  color: #fff;
+}
+.btn-primary:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+}
+
+/* ============================================================
+   Animations
+   ============================================================ */
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+
+.animate-fade-in {
+  animation: fadeIn var(--transition-base) ease both;
+}
+
+.animate-slide-up {
+  animation: slideUp var(--transition-slow) ease both;
+}
+
+/* Staggered children */
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 50ms; }
+.stagger > *:nth-child(3) { animation-delay: 100ms; }
+.stagger > *:nth-child(4) { animation-delay: 150ms; }
+.stagger > *:nth-child(5) { animation-delay: 200ms; }
+.stagger > *:nth-child(6) { animation-delay: 250ms; }
+.stagger > *:nth-child(7) { animation-delay: 300ms; }
+.stagger > *:nth-child(8) { animation-delay: 350ms; }
+.stagger > *:nth-child(9) { animation-delay: 400ms; }
+.stagger > *:nth-child(10) { animation-delay: 450ms; }
+.stagger > *:nth-child(n+11) { animation-delay: 500ms; }
+
+/* ============================================================
+   Skeleton loader
+   ============================================================ */
+
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-card-hover) 37%, var(--bg-card) 63%);
+  background-size: 200px 100%;
+  animation: shimmer 1.4s ease infinite;
+  border-radius: var(--radius-sm);
+}

@@ -362,6 +362,44 @@ services:
     mem_limit: ${FASTAPI_MEM_LIMIT:-512m}
     restart: unless-stopped
 
+  catalog-api:
+    build: ./catalog-api
+    image: ${CATALOG_API_IMAGE:-lakehouse-catalog-api:latest}
+    profiles: ["apps"]
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    environment:
+      <<: *common-env
+      DBT_MODELS_DIR: /dbt/models
+      TABLES_PY_PATH: /common/tables.py
+      CORS_ORIGINS: ${CATALOG_CORS_ORIGINS:-http://localhost:3002}
+      WATCHFILES_FORCE_POLLING: "true"
+    ports: ["8087:8000"]
+    volumes:
+      - ./catalog-api:/app
+      - ./dbt:/dbt:ro
+      - ./spark/app/common:/common:ro
+    depends_on:
+      - trino
+      - unitycatalog
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: ${CATALOG_API_MEM_LIMIT:-512m}
+    restart: unless-stopped
+
+  portal:
+    build: ./portal
+    image: ${PORTAL_IMAGE:-lakehouse-portal:latest}
+    profiles: ["apps"]
+    ports: ["3002:80"]
+    depends_on:
+      - catalog-api
+      - fastapi
+    mem_limit: ${PORTAL_MEM_LIMIT:-256m}
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   minio-data:

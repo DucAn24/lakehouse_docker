@@ -39,7 +39,7 @@ services:
     environment: *common-env
     ports: ["5432:5432"]
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
       - ./postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
       - ${DATASET_DIR:-../dataset}:/data:ro
       - ./postgres/sql:/sql:ro
@@ -57,7 +57,7 @@ services:
     environment: *common-env
     ports: ["9000:9000", "9001:9001"]
     volumes:
-      - minio-data:/data
+      - ./data/minio:/data
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
@@ -111,7 +111,7 @@ services:
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
     ports: ["29092:29092"]
     volumes:
-      - kafka-data:/var/lib/kafka/data
+      - ./data/kafka:/var/lib/kafka/data
     healthcheck:
       test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1"]
       interval: 10s
@@ -174,7 +174,7 @@ services:
     ports: ["8086:8080"]
     volumes:
       - ./unitycatalog/server.properties:/home/unitycatalog/etc/conf/server.properties:ro
-      - uc-data:/home/unitycatalog/etc/db
+      - ./data/uc:/home/unitycatalog/etc/db
     depends_on:
       minio-init: { condition: service_completed_successfully }
     healthcheck:
@@ -319,7 +319,7 @@ services:
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./grafana/provisioning/alerting:/etc/grafana/provisioning/alerting:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana-data:/var/lib/grafana
+      - ./data/grafana:/var/lib/grafana
     depends_on:
       - trino
     mem_limit: ${GRAFANA_MEM_LIMIT:-512m}
@@ -399,10 +399,3 @@ services:
       - fastapi
     mem_limit: ${PORTAL_MEM_LIMIT:-256m}
     restart: unless-stopped
-
-volumes:
-  postgres-data:
-  minio-data:
-  kafka-data:
-  grafana-data:
-  uc-data:

@@ -89,6 +89,10 @@ for node in parse(APP / "common" / "tables.py").body:
             registry[name] = [k.value for k in node.value.keys]
 
 job_names = {p.stem for p in (APP / "jobs").rglob("*.py")}
+for name in ("_SILVER_TABLES", "_GOLD_TABLES", "_BRONZE_TOPICS"):
+    if name not in registry:
+        problems.append(f"common/tables.py: {name} not found as a literal assignment")
+        registry[name] = []
 for table in registry["_SILVER_TABLES"] + registry["_GOLD_TABLES"]:
     if table not in job_names:
         problems.append(f"common/tables.py: table {table} has no job file under spark/app/jobs/")
@@ -99,7 +103,11 @@ for node in parse(APP / "common" / "quality.py").body:
         quality["bronze"] = [k.value for k in node.value.keys]
     if isinstance(node, ast.FunctionDef) and node.name in ("get_silver_checks", "get_gold_checks"):
         returns = [n for n in ast.walk(node) if isinstance(n, ast.Return) and isinstance(n.value, ast.Dict)]
-        quality[node.name.split("_")[1]] = [k.value for k in returns[-1].value.keys]
+        keys = returns[-1].value.keys if returns else []
+        if not returns or not all(isinstance(k, ast.Constant) for k in keys):
+            problems.append(f"common/quality.py: {node.name} must end with `return {{...}}` using literal string keys")
+        else:
+            quality[node.name.split("_")[1]] = [k.value for k in keys]
 
 for layer, key in (("bronze", "_BRONZE_TOPICS"), ("silver", "_SILVER_TABLES"), ("gold", "_GOLD_TABLES")):
     in_quality, in_registry = set(quality.get(layer, [])), set(registry[key])

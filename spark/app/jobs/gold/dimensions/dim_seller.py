@@ -1,10 +1,9 @@
 import sys
-from datetime import datetime
 
 from pyspark.sql.functions import col, current_timestamp
 
 from common.config import create_spark_session, get_logger, SILVER_BUCKET, GOLD_BUCKET
-from common.transforms import generate_surrogate_key
+from common.transforms import generate_surrogate_key, with_unknown_member
 from common.writers import write_with_metrics
 
 logger = get_logger("s2g.dim_seller")
@@ -37,9 +36,16 @@ def run(spark):
         current_timestamp().alias("etl_loaded_at"),
     )
 
-    unknown_row = [(-1, "UNKNOWN", "00000", "UNKNOWN", "UNKNOWN", "OUTROS", None, None, datetime.now())]
-    df_unknown = spark.createDataFrame(unknown_row, schema=df_dim.schema)
-    df_final = df_dim.unionByName(df_unknown)
+    df_final = with_unknown_member(
+        df_dim,
+        {
+            "seller_sk": -1,
+            "seller_id": "UNKNOWN",
+            "seller_city": "UNKNOWN",
+            "seller_state": "UNKNOWN",
+            "seller_region": "UNKNOWN",
+        },
+    )
 
     write_with_metrics(df_final, spark, "gold", "dim_seller", GOLD_PATH)
 

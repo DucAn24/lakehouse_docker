@@ -175,7 +175,7 @@ def test_dimensions_have_unique_keys_and_unknown_member(lake, table, key):
     df = lake("gold", table)
     keys = [r[key] for r in df.select(key).collect()]
     assert len(keys) == len(set(keys))
-    assert -1 in keys, f"{table} is missing the UNKNOWN (-1) member"
+    assert keys.count(-1) == 1, f"{table} must have exactly one UNKNOWN (-1) member"
 
 
 def test_dim_customer_one_row_per_unique_customer(lake):

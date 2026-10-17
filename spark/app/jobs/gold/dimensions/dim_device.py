@@ -1,9 +1,8 @@
 import sys
-from datetime import datetime
 
 from pyspark.sql.functions import col, current_timestamp
 from common.config import create_spark_session, get_logger, SILVER_BUCKET, GOLD_BUCKET
-from common.transforms import generate_surrogate_key
+from common.transforms import generate_surrogate_key, with_unknown_member
 from common.writers import write_with_metrics
 
 logger = get_logger("s2g.dim_device")
@@ -23,10 +22,10 @@ def run(spark):
     df_dim = generate_surrogate_key(df_union, "device_sk")
     df_dim = df_dim.select(col("device_sk"), col("device"), current_timestamp().alias("etl_loaded_at"))
 
-    # Add UNKNOWN row
-    unknown_row = [(-1, "UNKNOWN", datetime.now())]
-    df_unknown = spark.createDataFrame(unknown_row, schema=df_dim.schema)
-    df_final = df_dim.unionByName(df_unknown)
+    df_final = with_unknown_member(
+        df_dim,
+        {"device_sk": -1, "device": "UNKNOWN"},
+    )
 
     write_with_metrics(df_final, spark, "gold", "dim_device", GOLD_PATH)
 

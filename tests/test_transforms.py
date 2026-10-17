@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from pyspark.sql.functions import col, date_format
+from pyspark.sql.functions import col, current_timestamp, date_format
 
 from common.metrics import record_metric
-from common.transforms import extract_cdc_latest, generate_surrogate_key, safe_to_timestamp
+from common.transforms import extract_cdc_latest, generate_surrogate_key, safe_to_timestamp, with_unknown_member
 from common.writers import write_with_metrics
 
 
@@ -48,6 +48,33 @@ def test_extract_cdc_latest_reinsert_after_delete_wins(spark):
 def test_extract_cdc_latest_without_before_column_only_filters_deletes(spark):
     df = _cdc(spark, [("r", 1, "a", "v"), ("d", 9, "b", None)]).drop("before")
     assert {r.id for r in extract_cdc_latest(df, key_cols=["id"]).collect()} == {"a"}
+
+
+def test_extract_cdc_latest_flat_frame_drops_keys_whose_newest_event_is_delete(spark):
+    # select_after=False: windows before filtering, and a ts tie goes to the delete
+    df = spark.createDataFrame(
+        [("c", 1, "a"), ("d", 2, "a"), ("u", 5, "b"), ("d", 5, "b"), ("c", 1, "c")], "op string, ts_ms long, id string"
+    )
+    out = extract_cdc_latest(df, key_cols=["id"], select_after=False)
+    assert {r.id for r in out.collect()} == {"c"}
+
+
+def test_extract_cdc_latest_payload_column_named_op_is_preserved(spark):
+    df = spark.createDataFrame(
+        [("c", 1, {"id": "a", "op": "payload"}, None)],
+        "op string, ts_ms long, after struct<id:string,op:string>, before struct<id:string,op:string>",
+    )
+    (row,) = extract_cdc_latest(df, key_cols=["id"]).collect()
+    assert (row.id, row.op) == ("a", "payload")
+
+
+def test_with_unknown_member_builds_row_by_name(spark):
+    df = spark.createDataFrame([(1, "x")], "sk long, name string").withColumn("etl_loaded_at", current_timestamp())
+    out = with_unknown_member(df, {"sk": -1, "name": "UNKNOWN"})
+    assert {(r.sk, r.name) for r in out.collect()} == {(1, "x"), (-1, "UNKNOWN")}
+    assert out.filter("etl_loaded_at is null").count() == 0
+    with pytest.raises(ValueError):
+        with_unknown_member(df, {"nope": 1})
 
 
 def test_extract_cdc_latest_one_row_per_key(spark):

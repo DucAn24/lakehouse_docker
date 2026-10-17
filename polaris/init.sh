@@ -1,18 +1,18 @@
 #!/bin/sh
-# Idempotent Polaris setup for the lakehouse: the `lakehouse` Iceberg catalog on MinIO, the grant
-# that lets the root principal manage its content, and the bronze/silver/gold/monitoring namespaces.
+# Idempotent Polaris setup for the lakehouse: the `lakehouse` Iceberg catalog on S3 (SeaweedFS), the
+# grant that lets the root principal manage its content, and the bronze/silver/gold/monitoring namespaces.
 # Run by the compose `polaris-init` service and by the test harness (tests/iceberg_lake.py).
 #
 # Storage: only `endpointInternal` is set (Polaris itself writes metadata there). Without a
 # client-facing `endpoint`, Polaris sends no `s3.endpoint` to clients, so every engine keeps its own
-# MinIO address (minio:9000 inside Docker, localhost:9000 on the host). stsUnavailable: no
-# credential vending, clients use their own MinIO keys.
+# S3 address (s3:8333 inside Docker, localhost:8333 on the host). stsUnavailable: no
+# credential vending, clients use their own S3 keys.
 set -eu
 
 POLARIS=${POLARIS_HOST_URL:-http://polaris:8181}
 CATALOG=${ICEBERG_CATALOG:-lakehouse}
 BUCKET=${LAKEHOUSE_BUCKET:-lakehouse}
-S3_INTERNAL=${S3_ENDPOINT:-http://minio:9000}
+S3_INTERNAL=${S3_ENDPOINT:-http://s3:8333}
 REGION=${AWS_REGION:-us-east-1}
 NAMESPACES="bronze silver gold monitoring"
 

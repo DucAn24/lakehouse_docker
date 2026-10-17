@@ -2,7 +2,7 @@
 
 Spark-backed tests run a local Spark session built by the real `common.config.create_spark_session`,
 writing Iceberg tables to the `lakehouse` catalog:
-  - with Docker: a throwaway Polaris + MinIO (iceberg_lake.py), the same REST catalog as the stack;
+  - with Docker: a throwaway Polaris + S3 (SeaweedFS) (iceberg_lake.py), the same REST catalog as the stack;
     Trino joins it on demand (fixture `trino_lake`) so dbt builds gold over the very same tables;
   - without Docker: a local file-based Iceberg catalog under a temp dir (gold tests skip).
 They are skipped when Java is missing; run them with `pip install -r tests/requirements.txt` and a
@@ -38,7 +38,7 @@ def _java_available() -> bool:
 
 @pytest.fixture(scope="session")
 def iceberg_lake():
-    """MinIO + Polaris containers (see iceberg_lake.py), or None without Docker."""
+    """S3 (SeaweedFS) + Polaris containers (see iceberg_lake.py), or None without Docker."""
     from iceberg_lake import IcebergLake, docker_available
 
     if not docker_available():
@@ -82,7 +82,7 @@ def trino_lake(spark, iceberg_lake):
     """Trino on the test catalog, to run the dbt gold models (needs Docker and dbt-trino)."""
     pytest.importorskip("dbt.adapters.trino", reason="dbt-trino not installed")
     if iceberg_lake is None:
-        pytest.skip("Docker not available (the dbt gold models run on Trino + Polaris + MinIO containers)")
+        pytest.skip("Docker not available (the dbt gold models run on Trino + Polaris + S3 (SeaweedFS) containers)")
     iceberg_lake.start_trino()
     return iceberg_lake
 

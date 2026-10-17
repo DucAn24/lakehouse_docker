@@ -2,7 +2,7 @@
 # E-Commerce & Clickstream Lakehouse — Docker Compose
 # ==========================================
 # Bản chuyển đổi từ Helm chart (helm/lakehouse) sang Docker Compose.
-#   docker compose up -d                  → core ETL stack (Postgres, MinIO, Kafka, Debezium, Polaris, Trino, Spark, Airflow)
+#   docker compose up -d                  → core ETL stack (Postgres, SeaweedFS S3, Kafka, Debezium, Polaris, Trino, Spark, Airflow)
 #   docker compose --profile apps up -d   → thêm Metabase, Grafana, Kafka UI, FastAPI chatbot, Catalog API, Portal, Polaris Console
 # Bảng: Apache Iceberg; catalog: Apache Polaris (Iceberg REST) tên `lakehouse`, dùng chung cho Spark, Trino, PyIceberg, DuckDB...
 # Biến môi trường lấy từ .env (copy từ .env.example).
@@ -12,12 +12,10 @@ x-common-env: &common-env
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
   POSTGRES_DB: ${POSTGRES_DB:-orders}
-  MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
-  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-password123}
-  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
-  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-password123}
+  AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-admin}
+  AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-password123}
   AWS_REGION: ${AWS_REGION:-us-east-1}
-  S3_ENDPOINT: http://minio:9000
+  S3_ENDPOINT: http://s3:8333
   POLARIS_URI: http://polaris:8181/api/catalog
   POLARIS_CLIENT_ID: ${POLARIS_ROOT_CLIENT_ID:-root}
   POLARIS_CLIENT_SECRET: ${POLARIS_ROOT_CLIENT_SECRET:-s3cr3t}
@@ -62,36 +60,27 @@ services:
     mem_limit: ${POSTGRES_MEM_LIMIT:-512m}
     restart: unless-stopped
 
-  minio:
-    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
-    command: ["server", "/data", "--console-address", ":9001"]
-    environment: *common-env
-    ports: ["9000:9000", "9001:9001"]
+  # S3 storage = SeaweedFS (`weed mini`: master + volume + filer + S3 trong một container).
+  # Key S3 và bucket tạo từ env lúc khởi động (idempotent).
+  s3:
+    image: chrislusf/seaweedfs:4.48
+    command: ["mini", "-dir=/data"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-admin}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-password123}
+      # Một bucket cho cả lakehouse: Polaris đặt bảng ở s3://lakehouse/<namespace>/<table>
+      S3_BUCKET: lakehouse
+    # S3 API, Admin UI (không publish 8181 của SeaweedFS: trùng cổng Polaris)
+    ports: ["8333:8333", "23646:23646"]
     volumes:
-      - ./data/minio:/data
+      - ./data/s3:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8333/healthz"]
       interval: 5s
       timeout: 5s
-      retries: 20
-    mem_limit: ${MINIO_MEM_LIMIT:-512m}
+      retries: 30
+    mem_limit: ${S3_MEM_LIMIT:-512m}
     restart: unless-stopped
-
-  minio-init:
-    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
-    environment: *common-env
-    depends_on:
-      minio: { condition: service_healthy }
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        until mc alias set myminio http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD; do
-          echo "  → MinIO not ready, retrying in 5s..."; sleep 5
-        done
-        # Một bucket cho cả lakehouse: Polaris đặt bảng ở s3://lakehouse/<namespace>/<table>
-        mc mb myminio/lakehouse --ignore-existing
-        echo "✓ Bucket created: lakehouse"
-    restart: "no"
 
   kafka:
     image: confluentinc/cp-kafka:7.6.0
@@ -161,7 +150,7 @@ services:
     restart: "no"
 
   # Apache Polaris — Iceberg REST catalog `lakehouse` dùng chung cho mọi engine.
-  # Không vend credential (MinIO, stsUnavailable): client dùng key MinIO của chính nó.
+  # Không vend credential (stsUnavailable): client dùng key S3 của chính nó.
   polaris-db-init:
     image: postgres:15-alpine
     environment:
@@ -198,10 +187,10 @@ services:
       POLARIS_REALM_CONTEXT_REALMS: POLARIS
       QUARKUS_OTEL_SDK_DISABLED: "true"
       polaris.readiness.ignore-severe-issues: "true"
-      # Polaris tự ghi metadata.json lên MinIO bằng key này (endpointInternal của catalog)
+      # Polaris tự ghi metadata.json lên S3 bằng key này (endpointInternal của catalog)
       AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-password123}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-admin}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-password123}
       # Polaris Console (profile apps) gọi API thẳng từ trình duyệt
       QUARKUS_HTTP_CORS_ENABLED: "true"
       QUARKUS_HTTP_CORS_ORIGINS: http://localhost:8088
@@ -210,7 +199,7 @@ services:
     ports: ["8181:8181", "8182:8182"]
     depends_on:
       polaris-bootstrap: { condition: service_completed_successfully }
-      minio-init: { condition: service_completed_successfully }
+      s3: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "curl", "--fail", "-s", "http://localhost:8182/q/health"]
       interval: 5s
@@ -233,7 +222,7 @@ services:
 
   trino:
     image: trinodb/trino:483
-    environment: *common-env  # lakehouse.properties đọc key Polaris/MinIO từ biến môi trường (ENV:...)
+    environment: *common-env  # lakehouse.properties đọc key Polaris/S3 từ biến môi trường (ENV:...)
     ports: ["8081:8080"]
     volumes:
       - ./trino/config.properties:/etc/trino/config.properties:ro

@@ -1,9 +1,9 @@
-"""Throwaway MinIO + Polaris (+ Trino on demand) in Docker: the stack's Iceberg catalog for the tests.
+"""Throwaway S3 (SeaweedFS) + Polaris (+ Trino on demand) in Docker: the stack's Iceberg catalog for the tests.
 
 Same setup as docker-compose.yml: Polaris (in-memory persistence, root credentials bootstrapped
 from the environment) is configured by the repo's own polaris/init.sh, and Trino runs with the repo's
 trino/config.properties and trino/catalog/lakehouse.properties. Containers answer to the stack's host
-names (minio, polaris, trino) on a private network, so the local Spark session (via published ports)
+names (s3, polaris, trino) on a private network, so the local Spark session (via published ports)
 and Trino/dbt share one catalog and one bucket — no files are copied between engines.
 Files move into containers with `docker cp` (no bind mounts), so this also works when the tests
 themselves run in a container; set LAKE_HOST to the address that reaches published ports from
@@ -27,10 +27,9 @@ DBT_PROJECT = ROOT / "dbt"
 # same images as docker-compose.yml
 TRINO_IMAGE = "trinodb/trino:483"
 POLARIS_IMAGE = "apache/polaris:1.7.0"
-MINIO_IMAGE = "pgsty/minio:RELEASE.2026-08-04T00-00-00Z"
-MC_IMAGE = "pgsty/mc:RELEASE.2026-09-16T00-00-00Z"
+S3_IMAGE = "chrislusf/seaweedfs:4.48"
 CURL_IMAGE = "curlimages/curl:latest"
-MINIO_USER, MINIO_PASSWORD = "admin", "password123"
+S3_USER, S3_PASSWORD = "admin", "password123"
 POLARIS_ID, POLARIS_SECRET = "root", "s3cr3t"
 REGION = "us-east-1"
 CATALOG = "lakehouse"
@@ -42,9 +41,9 @@ NETWORK_ENV = {
     "POLARIS_CLIENT_ID": POLARIS_ID,
     "POLARIS_CLIENT_SECRET": POLARIS_SECRET,
     "ICEBERG_CATALOG": CATALOG,
-    "S3_ENDPOINT": "http://minio:9000",
-    "AWS_ACCESS_KEY_ID": MINIO_USER,
-    "AWS_SECRET_ACCESS_KEY": MINIO_PASSWORD,
+    "S3_ENDPOINT": "http://s3:8333",
+    "AWS_ACCESS_KEY_ID": S3_USER,
+    "AWS_SECRET_ACCESS_KEY": S3_PASSWORD,
     "AWS_REGION": REGION,
 }
 
@@ -83,7 +82,7 @@ class IcebergLake:
     def __init__(self):
         self.name = f"lakehouse-test-{uuid.uuid4().hex[:8]}"
         self.host = ""
-        self.minio_url = self.polaris_url = self.url = ""
+        self.s3_url = self.polaris_url = self.url = ""
         self._containers: list[str] = []
 
     def _published(self, container: str, port: int) -> str:
@@ -99,10 +98,12 @@ class IcebergLake:
 
     def start(self) -> None:
         _docker("network", "create", self.name)
-        minio = self._run(
-            "minio", "-p", "127.0.0.1::9000",
-            "-e", f"MINIO_ROOT_USER={MINIO_USER}", "-e", f"MINIO_ROOT_PASSWORD={MINIO_PASSWORD}",
-            MINIO_IMAGE, "server", "/data",
+        # SeaweedFS `weed mini` creates the S3 keys and the bucket from the environment
+        s3 = self._run(
+            "s3", "-p", "127.0.0.1::8333",
+            "-e", f"AWS_ACCESS_KEY_ID={S3_USER}", "-e", f"AWS_SECRET_ACCESS_KEY={S3_PASSWORD}",
+            "-e", f"S3_BUCKET={CATALOG}",
+            S3_IMAGE, "mini", "-dir=/data",
         )  # fmt: skip
         polaris = self._run(
             "polaris", "-p", "127.0.0.1::8181", "-p", "127.0.0.1::8182",
@@ -110,17 +111,13 @@ class IcebergLake:
             "-e", "POLARIS_REALM_CONTEXT_REALMS=POLARIS",
             "-e", "QUARKUS_OTEL_SDK_DISABLED=true",
             "-e", "polaris.readiness.ignore-severe-issues=true",
-            "-e", f"AWS_ACCESS_KEY_ID={MINIO_USER}", "-e", f"AWS_SECRET_ACCESS_KEY={MINIO_PASSWORD}",
+            "-e", f"AWS_ACCESS_KEY_ID={S3_USER}", "-e", f"AWS_SECRET_ACCESS_KEY={S3_PASSWORD}",
             "-e", f"AWS_REGION={REGION}",
             POLARIS_IMAGE,
         )  # fmt: skip
-        _docker(
-            "run", "--rm", "--network", self.name, "--entrypoint", "sh", MC_IMAGE, "-c",
-            f"until mc alias set m http://minio:9000 {MINIO_USER} {MINIO_PASSWORD} >/dev/null 2>&1; do sleep 1; done; "
-            f"mc mb --ignore-existing m/{CATALOG}",
-        )  # fmt: skip
-        self.minio_url = self._published(minio, 9000)
+        self.s3_url = self._published(s3, 8333)
         self.polaris_url = self._published(polaris, 8181)
+        _wait(f"{self.s3_url}/healthz", lambda body: True, "SeaweedFS S3", s3)
         _wait(f"{self._published(polaris, 8182)}/q/health", lambda body: b'"UP"' in body, "Polaris", polaris)
 
         # the stack's own init script: catalog on s3://lakehouse/, grants, namespaces
@@ -154,13 +151,13 @@ class IcebergLake:
         subprocess.run(["docker", "network", "rm", self.name], capture_output=True)
 
     def spark_env(self) -> dict[str, str]:
-        """Env for common.config.iceberg_catalog_conf: the local Spark session reaches Polaris and MinIO
+        """Env for common.config.iceberg_catalog_conf: the local Spark session reaches Polaris and S3
         through their published ports."""
         return {
             **NETWORK_ENV,
             "ICEBERG_CATALOG_TYPE": "rest",
             "POLARIS_URI": f"{self.polaris_url}/api/catalog",
-            "S3_ENDPOINT": self.minio_url,
+            "S3_ENDPOINT": self.s3_url,
         }
 
     def execute(self, sql: str) -> list[list]:

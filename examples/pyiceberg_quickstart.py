@@ -3,8 +3,8 @@
     pip install -r examples/requirements.txt
     python examples/pyiceberg_quickstart.py [--table gold.fact_orders]
 
-Connects to Polaris (the Iceberg REST catalog `lakehouse`) and MinIO on their host ports
-(localhost:8181 / localhost:9000), with the credentials from .env when present.
+Connects to Polaris (the Iceberg REST catalog `lakehouse`) and S3 (SeaweedFS) on their host ports
+(localhost:8181 / localhost:8333), with the credentials from .env when present.
 """
 
 from __future__ import annotations
@@ -29,11 +29,11 @@ def main() -> None:
             "warehouse": "lakehouse",
             "credential": f"{env('POLARIS_ROOT_CLIENT_ID', 'root')}:{env('POLARIS_ROOT_CLIENT_SECRET', 's3cr3t')}",
             "scope": "PRINCIPAL_ROLE:ALL",
-            # no credential vending (Polaris has none to give here): read MinIO with the keys below
+            # no credential vending (Polaris has none to give here): read S3 with the keys below
             "header.X-Iceberg-Access-Delegation": "",
-            "s3.endpoint": env("S3_HOST_ENDPOINT", "http://localhost:9000"),
-            "s3.access-key-id": env("MINIO_ROOT_USER", "admin"),
-            "s3.secret-access-key": env("MINIO_ROOT_PASSWORD", "password123"),
+            "s3.endpoint": env("S3_HOST_ENDPOINT", "http://localhost:8333"),
+            "s3.access-key-id": env("S3_ACCESS_KEY", "admin"),
+            "s3.secret-access-key": env("S3_SECRET_KEY", "password123"),
             "s3.region": env("AWS_REGION", "us-east-1"),
         },
     )

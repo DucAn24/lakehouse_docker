@@ -5,7 +5,7 @@ from pyspark.sql import SparkSession
 
 S3_ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY_ID", "admin")
 S3_SECRET_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "password123")
-S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "http://minio:9000")
+S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "http://s3:8333")
 S3_REGION = os.environ.get("AWS_REGION", "us-east-1")
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BROKER", "kafka:9092")
 
@@ -29,7 +29,7 @@ def iceberg_catalog_conf() -> dict[str, str]:
     """Spark conf of the `CATALOG` Iceberg catalog, read from the environment at call time.
 
     ICEBERG_CATALOG_TYPE=rest (default): Polaris REST catalog (POLARIS_URI, POLARIS_CLIENT_ID/SECRET),
-    data files on MinIO via Iceberg's S3FileIO with this process's own MinIO keys (no credential vending).
+    data files on S3 (SeaweedFS) via Iceberg's S3FileIO with this process's own S3 keys (no credential vending).
     ICEBERG_CATALOG_TYPE=hadoop: a file-based catalog under ICEBERG_WAREHOUSE, used by the unit tests.
     """
     env = os.environ

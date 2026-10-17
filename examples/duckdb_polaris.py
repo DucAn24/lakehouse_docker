@@ -4,8 +4,8 @@
     python examples/duckdb_polaris.py
 
 DuckDB's iceberg extension talks to Polaris (the Iceberg REST catalog `lakehouse`) and reads the
-Parquet files from MinIO directly, on the host ports (localhost:8181 / localhost:9000). Polaris vends
-no credentials here, so the MinIO keys come from an S3 secret (ACCESS_DELEGATION_MODE 'none').
+Parquet files from S3 (SeaweedFS) directly, on the host ports (localhost:8181 / localhost:8333). Polaris vends
+no credentials here, so the S3 keys come from an S3 secret (ACCESS_DELEGATION_MODE 'none').
 """
 
 from __future__ import annotations
@@ -27,15 +27,15 @@ QUERY = """
 
 def connect() -> duckdb.DuckDBPyConnection:
     polaris = env("POLARIS_URI", "http://localhost:8181/api/catalog")
-    s3 = urlparse(env("S3_HOST_ENDPOINT", "http://localhost:9000"))
+    s3 = urlparse(env("S3_HOST_ENDPOINT", "http://localhost:8333"))
     con = duckdb.connect()
     for ext in ("httpfs", "iceberg"):
         con.install_extension(ext)
         con.load_extension(ext)
     con.execute(
         f"""
-        CREATE SECRET minio (
-            TYPE s3, KEY_ID '{env('MINIO_ROOT_USER', 'admin')}', SECRET '{env('MINIO_ROOT_PASSWORD', 'password123')}',
+        CREATE SECRET lake (
+            TYPE s3, KEY_ID '{env('S3_ACCESS_KEY', 'admin')}', SECRET '{env('S3_SECRET_KEY', 'password123')}',
             ENDPOINT '{s3.netloc}', URL_STYLE 'path', USE_SSL {str(s3.scheme == 'https').lower()},
             REGION '{env('AWS_REGION', 'us-east-1')}'
         )

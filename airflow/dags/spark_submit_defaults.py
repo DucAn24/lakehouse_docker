@@ -57,7 +57,7 @@ SPARK_CONF = {
 SPARK_ENV_VARS = {
     "AWS_ACCESS_KEY_ID": os.environ.get("AWS_ACCESS_KEY_ID", "admin"),
     "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY", "password123"),
-    "S3_ENDPOINT": os.environ.get("S3_ENDPOINT", "http://minio:9000"),
+    "S3_ENDPOINT": os.environ.get("S3_ENDPOINT", "http://s3:8333"),
     "AWS_REGION": os.environ.get("AWS_REGION", "us-east-1"),
     "POLARIS_URI": os.environ.get("POLARIS_URI", "http://polaris:8181/api/catalog"),
     "POLARIS_CLIENT_ID": os.environ.get("POLARIS_CLIENT_ID", "root"),

@@ -4,7 +4,7 @@ lakehouse_etl_pipeline
 Full medallion ETL pipeline for the e-commerce data lakehouse (Olist + Clickstream).
 
 Stage 1 – Kafka → Bronze
-    Reads all Debezium CDC topics from Kafka and writes Iceberg tables (Polaris catalog `lakehouse`, data on MinIO).
+    Reads all Debezium CDC topics from Kafka and writes Iceberg tables (Polaris catalog `lakehouse`, data on S3 / SeaweedFS).
 
 Stage 2 – Bronze → Silver  (runs after the Bronze quality gate)
     Cleans, types, and enriches each domain entity.
@@ -182,7 +182,7 @@ with DAG(
     dq_silver >> dbt_build_gold
 
     # =========================================================================
-    # Stage 4: Iceberg maintenance (expire snapshots, remove orphan files) — frees MinIO space
+    # Stage 4: Iceberg maintenance (expire snapshots, remove orphan files) — frees S3 space
     # =========================================================================
     maintain_iceberg_tables = SparkSubmitOperator(
         task_id="maintain_iceberg_tables",

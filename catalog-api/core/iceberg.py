@@ -44,8 +44,8 @@ def _get_catalog() -> Catalog:
                     # PyIceberg asks for vended credentials by default, which Polaris rejects for this
                     # catalog (stsUnavailable); an empty header means no delegation
                     "header.X-Iceberg-Access-Delegation": "",
-                    # MinIO with this service's own keys (Polaris vends no credentials)
-                    "s3.endpoint": os.getenv("S3_ENDPOINT", "http://minio:9000"),
+                    # S3 with this service's own keys (Polaris vends no credentials)
+                    "s3.endpoint": os.getenv("S3_ENDPOINT", "http://s3:8333"),
                     "s3.access-key-id": os.getenv("AWS_ACCESS_KEY_ID", "admin"),
                     "s3.secret-access-key": os.getenv("AWS_SECRET_ACCESS_KEY", "password123"),
                     "s3.region": os.getenv("AWS_REGION", "us-east-1"),

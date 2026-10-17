@@ -7,7 +7,7 @@
 [![Trino](https://img.shields.io/badge/Trino-483-DD00A1?logo=trino&logoColor=white)](https://trino.io/)
 [![Apache Kafka](https://img.shields.io/badge/Apache_Kafka-7.6.0_KRaft-231F20?logo=apache-kafka&logoColor=white)](https://kafka.apache.org/)
 [![Debezium](https://img.shields.io/badge/Debezium_CDC-2.7.0-93005A)](https://debezium.io/)
-[![MinIO](https://img.shields.io/badge/MinIO-S3_Storage-C72C48?logo=minio&logoColor=white)](https://min.io/)
+[![SeaweedFS](https://img.shields.io/badge/SeaweedFS-S3_Storage-2E7D32)](https://github.com/seaweedfs/seaweedfs)
 [![Grafana](https://img.shields.io/badge/Grafana-11.x-F46800?logo=grafana&logoColor=white)](https://grafana.com/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Docker Compose](https://img.shields.io/badge/Docker_Compose-v2+-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
@@ -75,7 +75,7 @@ flowchart TB
 
     subgraph LakehouseStorage["03. Storage & Catalog Tier"]
         POLARIS[("Apache Polaris 1.7\nIceberg REST catalog: lakehouse\nbronze / silver / gold / monitoring\n(metadata in Postgres)")]
-        S3[("MinIO s3://lakehouse/\nIceberg tables\n(Parquet + metadata)")]
+        S3[("SeaweedFS S3 s3://lakehouse/\nIceberg tables\n(Parquet + metadata)")]
         POLARIS -.->|"table metadata"| S3
     end
 
@@ -232,7 +232,7 @@ All tables are **Apache Iceberg** (spec v2) tables in one **Apache Polaris** cat
 1. **Polaris** (`polaris`, port `8181`; health on `8182`):
    - Metadata persists in the `polaris` database of the stack's PostgreSQL (`relational-jdbc`); `polaris-bootstrap` creates the realm and the root principal (`POLARIS_ROOT_CLIENT_ID` / `POLARIS_ROOT_CLIENT_SECRET` in `.env`) on first start.
    - [`polaris/init.sh`](polaris/init.sh) (service `polaris-init`, idempotent) creates the catalog on `s3://lakehouse/`, grants `CATALOG_MANAGE_CONTENT`, and creates the namespaces `bronze`, `silver`, `gold`, `monitoring`. Tables land under `s3://lakehouse/<namespace>/<table>`.
-   - No credential vending (`stsUnavailable`): Polaris writes table metadata with its own MinIO key, and every engine reads/writes data files with its own MinIO keys. Only `endpointInternal` is set, so each client keeps its own MinIO address (`minio:9000` in Docker, `localhost:9000` on the host).
+   - No credential vending (`stsUnavailable`): Polaris writes table metadata with its own S3 key, and every engine reads/writes data files with its own S3 keys. Only `endpointInternal` is set, so each client keeps its own S3 address (`s3:8333` in Docker, `localhost:8333` on the host).
 2. **Spark** uses Iceberg's `SparkCatalog` (`type=rest`, OAuth2 client credentials, `S3FileIO`), configured in [`common/config.py`](spark/app/common/config.py). Jobs address tables by identifier (`lakehouse.silver.olist_orders`), never by path.
 3. **Trino** uses its Iceberg connector against the same catalog ([`trino/catalog/lakehouse.properties`](trino/catalog/lakehouse.properties), credentials from the environment). dbt builds gold through it; Grafana, Metabase, the chatbot and the catalog API query `lakehouse.<schema>.<table>`.
 4. **Everything else** that speaks Iceberg REST connects the same way: the catalog API (PyIceberg), the **Polaris Console** (`apps` profile, port `8088`), DuckDB and PyIceberg on the host (see [Querying from Other Engines](#querying-from-other-engines-duckdb-pyiceberg-)), or Flink, Snowflake, StarRocks and Dremio.
@@ -281,8 +281,8 @@ A modern single-page web portal running on port `3002` under the `apps` profile 
 | **Trino Coordinator** | [localhost:8081](http://localhost:8081) | `8080` | Distributed SQL query engine | `admin` (no password) |
 | **Polaris (Iceberg REST)** | [localhost:8181](http://localhost:8181/api/catalog/v1/config?warehouse=lakehouse) | `8181` | Iceberg catalog `lakehouse` for every engine (health: `:8182/q/health`) | `root` / `POLARIS_ROOT_CLIENT_SECRET` |
 | **Kafka Connect API** | [localhost:8083](http://localhost:8083) | `8083` | Debezium CDC connectors manager | — |
-| **MinIO Console** | [localhost:9001](http://localhost:9001) | `9001` | S3 bucket & object browser | `admin` / `password123` |
-| **MinIO S3 API** | `localhost:9000` | `9000` | S3 object storage gateway | `admin` / `password123` |
+| **SeaweedFS Admin UI** | [localhost:23646](http://localhost:23646) | `23646` | S3 bucket & object browser, cluster status | — |
+| **SeaweedFS S3 API** | `localhost:8333` | `8333` | S3 object storage (service `s3`) | `admin` / `password123` |
 | **PostgreSQL** | `localhost:5432` | `5432` | OLTP source database (`orders`) | `postgres` / `123456` |
 | **Apache Kafka** | `localhost:29092` | `9092` | KRaft distributed event broker | — |
 | **Metabase** *(apps)* | [localhost:3000](http://localhost:3000) | `3000` | Business intelligence & visualizations | Initial setup on first visit |
@@ -403,7 +403,7 @@ python examples/duckdb_polaris.py
 python examples/pyiceberg_quickstart.py --table silver.olist_orders
 ```
 
-Connection settings for any other client: catalog URI `http://localhost:8181/api/catalog` (inside Docker: `http://polaris:8181/api/catalog`), warehouse `lakehouse`, OAuth2 credential `<POLARIS_ROOT_CLIENT_ID>:<POLARIS_ROOT_CLIENT_SECRET>` with scope `PRINCIPAL_ROLE:ALL`, and S3 endpoint `http://localhost:9000` (path-style) with the MinIO keys. Polaris vends no storage credentials in this setup, so clients bring the MinIO keys themselves.
+Connection settings for any other client: catalog URI `http://localhost:8181/api/catalog` (inside Docker: `http://polaris:8181/api/catalog`), warehouse `lakehouse`, OAuth2 credential `<POLARIS_ROOT_CLIENT_ID>:<POLARIS_ROOT_CLIENT_SECRET>` with scope `PRINCIPAL_ROLE:ALL`, and S3 endpoint `http://localhost:8333` (path-style) with the S3 keys (`S3_ACCESS_KEY` / `S3_SECRET_KEY`). Polaris vends no storage credentials in this setup, so clients bring the S3 keys themselves.
 
 ### Migrating an Existing Delta / Unity Catalog Install
 
@@ -426,6 +426,23 @@ The Iceberg tables are rebuilt from the sources (bronze re-reads every Kafka top
    ```
 
 4. Trigger `lakehouse_etl_pipeline`, and re-point Metabase to catalog `lakehouse`.
+
+### Migrating from MinIO to SeaweedFS
+
+Object storage is now SeaweedFS (service `s3`, `http://s3:8333`). It can't read MinIO's on-disk data, so `./data/minio` isn't reused. In `.env`, rename `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` to `S3_ACCESS_KEY` / `S3_SECRET_KEY` (and `MINIO_MEM_LIMIT` to `S3_MEM_LIMIT`).
+
+- **Clean rebuild (simplest).** The tables are rebuilt from Kafka and Postgres. Drop the Polaris database too, otherwise it still points at files that no longer exist:
+
+  ```powershell
+  docker compose --profile apps down
+  docker compose up -d postgres
+  docker compose exec postgres psql -U postgres -c "DROP DATABASE polaris"
+  Remove-Item -Recurse -Force .\data\minio
+  docker compose up -d   # polaris-db-init → polaris-bootstrap → polaris → polaris-init recreate the catalog
+  ```
+
+  Then trigger `lakehouse_etl_pipeline`.
+- **Keep the existing tables.** Polaris stores `s3://lakehouse/...` paths, not endpoints, so copying the objects is enough. Before deleting `./data/minio`, start the old MinIO once next to the new `s3` service and copy the bucket with `mc mirror old/lakehouse new/lakehouse` or `rclone sync`.
 
 ---
 
@@ -520,7 +537,7 @@ python -m pytest tests -v
 - **`test_quality.py`**: Tests DQ assertions, failure thresholds, and metric logging.
 - **`test_dags.py`**: Ensures Airflow DAG DAG-integrity and operator parameters.
 - **`test_monitoring_assets.py`**: Validates Grafana dashboards, alert provisioning, and Trino metrics.
-- **`test_pipeline_e2e.py`**: Runs an end-to-end integration test (Bronze fixtures $\rightarrow$ Silver MERGE $\rightarrow$ `dbt build` of the Gold star schema $\rightarrow$ DQ Gates) on a local Spark session against throwaway **Polaris + MinIO** containers, with dbt on a throwaway Trino attached to the same catalog (needs Docker; without Docker, the Spark tests use a local file-based Iceberg catalog and the gold tests skip). Spark fetches the Iceberg jars from Maven Central on first run.
+- **`test_pipeline_e2e.py`**: Runs an end-to-end integration test (Bronze fixtures $\rightarrow$ Silver MERGE $\rightarrow$ `dbt build` of the Gold star schema $\rightarrow$ DQ Gates) on a local Spark session against throwaway **Polaris + SeaweedFS (S3)** containers, with dbt on a throwaway Trino attached to the same catalog (needs Docker; without Docker, the Spark tests use a local file-based Iceberg catalog and the gold tests skip). Spark fetches the Iceberg jars from Maven Central on first run.
 
 ---
 

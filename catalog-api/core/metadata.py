@@ -1,8 +1,8 @@
-"""Metadata aggregator — merges Trino, dbt YAML docs, and the table registry.
+"""Metadata aggregator — merges Trino, the Iceberg catalog (Polaris), dbt YAML docs, and the table registry.
 
 Produces a unified view of every lakehouse table with columns, descriptions, FK
-relationships, DQ scores, row counts, and freshness timestamps.  Results are
-cached in memory with a configurable TTL (default 5 min).
+relationships, DQ scores, row counts, storage locations, and freshness timestamps.
+Results are cached in memory with a configurable TTL (default 5 min).
 """
 
 import ast
@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from core import query, query_scalar
+from core import iceberg, query, query_scalar
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +30,11 @@ TABLES_PY_PATH = Path(os.getenv("TABLES_PY_PATH", "/common/tables.py"))
 CACHE_TTL = int(os.getenv("METADATA_CACHE_TTL", "300"))
 ROW_COUNT_TTL = int(os.getenv("ROW_COUNT_CACHE_TTL", "3600"))
 TRINO_WORKERS = int(os.getenv("CATALOG_TRINO_WORKERS", "6"))
-BRONZE_SCHEMA = "delta.bronze"
-GOLD_SCHEMA = "delta.gold"
-SILVER_SCHEMA = "delta.silver"
-MONITORING_SCHEMA = "delta.monitoring"
+TRINO_CATALOG = os.getenv("TRINO_CATALOG", "lakehouse")
+BRONZE_SCHEMA = f"{TRINO_CATALOG}.bronze"
+GOLD_SCHEMA = f"{TRINO_CATALOG}.gold"
+SILVER_SCHEMA = f"{TRINO_CATALOG}.silver"
+MONITORING_SCHEMA = f"{TRINO_CATALOG}.monitoring"
 
 _REF = re.compile(r"ref\(\s*['\"]([^'\"]+)['\"]\s*\)")
 
@@ -68,15 +69,12 @@ def _registry_literals() -> Dict[str, Any]:
 
 
 def _parse_table_registry() -> Dict[str, Dict[str, str]]:
-    """Layer -> table -> path from common/tables.py, without importing Spark."""
+    """Layer -> table -> Iceberg identifier from common/tables.py, without importing Spark."""
     values = _registry_literals()
     layers: Dict[str, Dict[str, str]] = {"bronze": {}, "silver": {}, "gold": {}}
-    for name, topic in values.get("_BRONZE_TOPICS", {}).items():
-        layers["bronze"][name] = f"s3a://bronze/{topic}/"
-    for name in values.get("_SILVER_TABLES", []):
-        layers["silver"][name] = f"s3a://silver/{name}/"
-    for name in values.get("_GOLD_TABLES", []):
-        layers["gold"][name] = f"s3a://gold/{name}/"
+    for layer, key in (("bronze", "_BRONZE_TOPICS"), ("silver", "_SILVER_TABLES"), ("gold", "_GOLD_TABLES")):
+        for name in values.get(key, []):
+            layers[layer][name] = iceberg.identifier(layer, name)
     if not any(layers.values()):
         logger.warning("No tables found in %s: has common/tables.py been refactored?", TABLES_PY_PATH)
     return layers
@@ -146,7 +144,7 @@ def _load_dbt_docs() -> _DbtDocs:
 
 
 def _load_dq_scores() -> Dict[Tuple[str, str], Dict[str, Any]]:
-    """Result of the latest DQ run per (layer, table) from delta.monitoring.data_quality_log."""
+    """Result of the latest DQ run per (layer, table) from lakehouse.monitoring.data_quality_log."""
     scores: Dict[Tuple[str, str], Dict[str, Any]] = {}
     try:
         result = query(f"""
@@ -283,14 +281,16 @@ class MetadataStore:
         jobs = [(layer, name) for layer in schemas for name in sorted(registry.get(layer, {}))]
         with ThreadPoolExecutor(max_workers=TRINO_WORKERS) as pool:
             described = list(pool.map(lambda j: _describe_table(schemas[j[0]], j[1]), jobs))
+            locations = list(pool.map(lambda j: iceberg.location(*j), jobs))
         columns_by_table = dict(zip(jobs, described))
+        location_by_table = dict(zip(jobs, locations))
 
         tables_by_layer: Dict[str, List[Dict[str, Any]]] = {}
         index: Dict[str, Dict[str, Any]] = {}
 
         for layer in schemas:
             layer_tables: List[Dict[str, Any]] = []
-            for table_name, path in sorted(registry.get(layer, {}).items()):
+            for table_name, table_id in sorted(registry.get(layer, {}).items()):
                 enriched_columns = [
                     {
                         "column": col["column"],
@@ -308,7 +308,9 @@ class MetadataStore:
                 info: Dict[str, Any] = {
                     "name": table_name,
                     "layer": layer,
-                    "path": path,
+                    "identifier": table_id,
+                    # real Iceberg location (s3://lakehouse/<layer>/<table>...); identifier until it exists
+                    "path": location_by_table[(layer, table_name)] or table_id,
                     "description": docs.table_desc.get(table_name, ""),
                     "columns": enriched_columns,
                     "column_count": len(enriched_columns),

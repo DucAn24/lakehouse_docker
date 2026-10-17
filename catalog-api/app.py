@@ -6,6 +6,7 @@ import os
 from fastapi import FastAPI, Header, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from core import iceberg
 from core.metadata import store
 from core.lineage import lineage
 
@@ -89,6 +90,41 @@ def get_sample(layer: str, table: str, limit: int = Query(10, ge=1, le=50)):
 
 
 # ---------------------------------------------------------------------------
+# Iceberg metadata (PyIceberg → Polaris): snapshots, snapshot log, format properties
+# ---------------------------------------------------------------------------
+
+def _iceberg(fetch, layer: str, table: str, *args):
+    if not store.get_table(layer, table):
+        raise HTTPException(status_code=404, detail=f"Table {layer}/{table} not found")
+    try:
+        return fetch(layer, table, *args)
+    except iceberg.NoSuchTableError:
+        raise HTTPException(status_code=404, detail=f"Table {layer}/{table} has not been written yet")
+    except Exception as e:
+        logger.warning("Iceberg metadata for %s/%s failed: %s", layer, table, e)
+        raise HTTPException(status_code=502, detail=f"Iceberg catalog request failed: {e}")
+
+
+@app.get("/tables/{layer}/{table}/snapshots")
+def get_snapshots(layer: str, table: str, limit: int = Query(50, ge=1, le=500)):
+    """Iceberg snapshots, newest first: operation and added / deleted / total record counts."""
+    snaps = _iceberg(iceberg.snapshots, layer, table, limit)
+    return {"table": iceberg.identifier(layer, table), "snapshots": snaps, "count": len(snaps)}
+
+
+@app.get("/tables/{layer}/{table}/history")
+def get_history(layer: str, table: str):
+    """Iceberg snapshot log: which snapshot was current when (time-travel targets)."""
+    return {"table": iceberg.identifier(layer, table), "history": _iceberg(iceberg.history, layer, table)}
+
+
+@app.get("/tables/{layer}/{table}/properties")
+def get_properties(layer: str, table: str):
+    """Iceberg format metadata: location, current snapshot, partition spec, sort order, table properties."""
+    return _iceberg(iceberg.table_properties, layer, table)
+
+
+# ---------------------------------------------------------------------------
 # Search
 # ---------------------------------------------------------------------------
 
@@ -142,4 +178,5 @@ def invalidate_cache(x_requested_with: str = Header(None)):
         raise HTTPException(status_code=403, detail="Missing X-Requested-With header")
     store.invalidate()
     lineage.invalidate()
+    iceberg.invalidate()
     return {"message": "Cache invalidated"}

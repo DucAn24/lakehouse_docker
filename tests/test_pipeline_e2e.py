@@ -1,9 +1,10 @@
 """End-to-end run of the whole pipeline on the fixtures in bronze_fixtures.py.
 
 bronze (seeded here) -> every silver job -> silver DQ gate -> dbt gold models -> gold DQ gate.
-Silver jobs run through their real `run(spark)` entry points, reading and writing Delta under the
-temp lake configured in conftest.py; the dbt project builds gold on Trino (conftest `trino_lake`,
-needs Docker). Kafka ingestion (`kafka_to_bronze`) is out of scope here.
+Silver jobs run through their real `run(spark)` entry points, reading and writing Iceberg tables in
+the test `lakehouse` catalog (conftest.py); the dbt project builds gold on Trino over the same Polaris
+catalog (conftest `trino_lake`, needs Docker), and Spark reads that gold back for the DQ gate and the
+assertions. Kafka ingestion (`kafka_to_bronze`) is out of scope here.
 
 Tests share one pipeline run (module-scoped fixtures) and are ordered by layer.
 """
@@ -17,9 +18,10 @@ import pytest
 from pyspark.sql.functions import col
 
 from bronze_fixtures import BRONZE
-from common.config import METRICS_PATH
+from common.catalog import create_or_replace
 from common.quality import CHECKS, run_quality_checks
-from common.tables import MONITORING_SCHEMA, SILVER_KEYS, TABLES, table_path
+from common.tables import METRICS_TABLE, SILVER_KEYS, TABLES, table_id
+from common.writers import snapshot_ids
 
 JOBS = Path(__file__).resolve().parents[1] / "spark" / "app" / "jobs"
 
@@ -36,7 +38,7 @@ def _seed_bronze(spark):
         after = ", ".join(f"{c}: string" for c in columns)
         schema = f"op string, ts_ms long, after struct<{after}>"
         rows = [(op, ts, values) for op, ts, values in events]
-        spark.createDataFrame(rows, schema).write.format("delta").mode("overwrite").save(table_path("bronze", table))
+        create_or_replace(spark.createDataFrame(rows, schema), table_id("bronze", table))
 
 
 @pytest.fixture(scope="module")
@@ -45,7 +47,7 @@ def lake(spark):
     assert run_quality_checks(spark, "bronze", CHECKS["bronze"]()), "bronze quality gate failed"
 
     def read(layer: str, table: str):
-        return spark.read.format("delta").load(table_path(layer, table))
+        return spark.table(table_id(layer, table))
 
     for table in TABLES["silver"]:
         _module("silver", table).run(spark)
@@ -57,24 +59,16 @@ def lake(spark):
 def gold(spark, lake, trino_lake, tmp_path_factory):
     """`dbt build` of the gold models on Trino over the silver tables, then the gold DQ gate.
 
-    Mirrors what the DAG sees: silver and monitoring.pipeline_metrics registered in Trino.
-    Returns the same reader as `lake`.
+    Mirrors the DAG: Trino sees the silver tables and monitoring.pipeline_metrics Spark wrote, through
+    the shared Polaris catalog. Returns the same reader as `lake`.
     """
-    trino_lake.upload("silver")
-    trino_lake.upload("gold/_pipeline_metrics")
-    for table in TABLES["silver"]:
-        trino_lake.register("silver", table, f"s3://silver/{table}")
-    trino_lake.register(MONITORING_SCHEMA, "pipeline_metrics", "s3://gold/_pipeline_metrics")
-
     trino_lake.dbt_build(tmp_path_factory.mktemp("dbt"))
-
-    trino_lake.download("gold")
     assert run_quality_checks(spark, "gold", CHECKS["gold"]()), "gold quality gate failed"
     return lake
 
 
 def _recorded_metrics(spark) -> set[tuple[str, str]]:
-    metrics = spark.read.format("delta").load(METRICS_PATH).filter(col("status") == "success")
+    metrics = spark.table(METRICS_TABLE).filter(col("status") == "success")
     return {(r.layer, r.table_name) for r in metrics.collect()}
 
 
@@ -95,7 +89,7 @@ def test_metrics_recorded_for_every_silver_table(spark, lake):
 
 def test_dbt_records_metrics_for_every_gold_model(spark, gold):
     """The dbt on-run-end hook writes one success row per model, with the rows the model wrote."""
-    metrics = spark.read.format("delta").load(METRICS_PATH).filter((col("layer") == "gold") & (col("status") == "success"))
+    metrics = spark.table(METRICS_TABLE).filter((col("layer") == "gold") & (col("status") == "success"))
     assert {r.table_name: r.row_count for r in metrics.collect()} == {t: gold("gold", t).count() for t in TABLES["gold"]}
 
 
@@ -110,8 +104,7 @@ def test_silver_rerun_is_an_incremental_noop(spark, lake):
     _module("silver", "olist_orders").run(spark)
     assert {r.order_id: r.processed_at for r in lake("silver", "olist_orders").collect()} == stamps
     last = (
-        spark.read.format("delta")
-        .load(METRICS_PATH)
+        spark.table(METRICS_TABLE)
         .filter((col("table_name") == "olist_orders") & (col("layer") == "silver"))
         .orderBy(col("recorded_at").desc())
         .first()
@@ -119,13 +112,21 @@ def test_silver_rerun_is_an_incremental_noop(spark, lake):
     assert (last.write_mode, last.rows_inserted, last.rows_updated, last.rows_deleted) == ("merge", 0, 0, 0)
 
 
-def test_silver_tables_have_change_feed_and_keys_match_dq(spark, lake):
+def test_silver_tables_are_iceberg_v2_and_keys_match_dq(spark, lake):
     checks = CHECKS["silver"]()
     assert set(SILVER_KEYS) == set(TABLES["silver"])
-    for table, path in TABLES["silver"].items():
+    for table, ident in TABLES["silver"].items():
         assert SILVER_KEYS[table] == checks[table]["primary_keys"], table
-        props = spark.sql(f"DESCRIBE DETAIL delta.`{path}`").first()["properties"]
-        assert props["delta.enableChangeDataFeed"] == "true", table
+        props = {r.key: r.value for r in spark.sql(f"SHOW TBLPROPERTIES {ident}").collect()}
+        assert props["format-version"] == "2", table
+        assert snapshot_ids(spark, ident), table
+
+
+def test_trino_and_spark_see_the_same_gold_snapshot(spark, gold, trino_lake):
+    """One catalog: Trino reads exactly the rows Spark sees, with no registration step."""
+    for table in ("fact_orders", "dim_customer"):
+        ((count,),) = trino_lake.execute(f"SELECT count(*) FROM lakehouse.gold.{table}")
+        assert count == gold("gold", table).count(), table
 
 
 # ---- silver business rules ---------------------------------------------------------------

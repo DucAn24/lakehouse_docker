@@ -2,8 +2,8 @@ version: 2
 
 sources:
   - name: silver
-    description: Cleaned domain tables written by the Spark silver jobs (MERGE + Change Data Feed).
-    database: "{{ env_var('TRINO_CATALOG', 'delta') }}"
+    description: Cleaned domain Iceberg tables written by the Spark silver jobs (MERGE upserts, one snapshot per run).
+    database: "{{ env_var('TRINO_CATALOG', 'lakehouse') }}"
     schema: silver
     tables:
       - name: olist_customers

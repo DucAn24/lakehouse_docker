@@ -1,7 +1,7 @@
 """Pipeline metrics tracker.
 
-Logs execution metadata (row counts, duration, status) to a Delta table
-at METRICS_PATH so runs can be monitored via Trino / Metabase.
+Logs execution metadata (row counts, duration, status) to the Iceberg table
+common.tables.METRICS_TABLE so runs can be monitored via Trino / Grafana / Metabase.
 """
 
 from __future__ import annotations
@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 
 from pyspark.sql import SparkSession
 
-from common.config import METRICS_PATH
+from common.catalog import append_rows
+from common.tables import METRICS_TABLE
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ def _write_metric(
     rows_updated: int | None = None,
     rows_deleted: int | None = None,
 ):
-    """Append a single metric row to the metrics Delta table."""
+    """Append a single metric row to the metrics table."""
     now = datetime.now(timezone.utc)
     row = (
         now.isoformat(),
@@ -107,9 +108,8 @@ def _write_metric(
         rows_deleted,
     )
     try:
-        df = spark.createDataFrame([row], _METRICS_DDL)
-        # mergeSchema: tables written before the merge counters existed gain the new columns
-        df.write.format("delta").mode("append").option("mergeSchema", "true").save(METRICS_PATH)
+        # append_rows merges the schema: a table written before a counter existed gains the column
+        append_rows(spark.createDataFrame([row], _METRICS_DDL), METRICS_TABLE)
     except Exception:
         # Metrics should never break the pipeline
         logger.warning(

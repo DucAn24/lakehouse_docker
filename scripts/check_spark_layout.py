@@ -74,9 +74,6 @@ for dag_file in sorted(DAGS.glob("*.py")):
         target = consts[const] / rest.lstrip("/")
         if not target.is_file():
             problems.append(f"{rel(dag_file)}: job not found {rel(target)}")
-for layer in ("bronze", "silver", "gold"):
-    if not (APP / "jobs" / layer / "register_tables.py").is_file():
-        problems.append(f"missing spark/app/jobs/{layer}/register_tables.py")
 
 # 3. table registry <-> job files <-> quality rules ----------------------------------------
 registry: dict[str, list[str]] = {}

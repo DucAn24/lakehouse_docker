@@ -38,7 +38,7 @@ jobs:
         run: python scripts/check_spark_layout.py
 
   tests:
-    name: Pytest (unit + end-to-end on local Spark/Delta, dbt gold on Trino)
+    name: Pytest (unit + end-to-end on local Spark/Iceberg, Polaris catalog, dbt gold on Trino)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -57,9 +57,11 @@ jobs:
       - name: Install test dependencies
         run: pip install -r tests/requirements.txt
 
-      # the dbt gold models run on throwaway Trino + MinIO containers (tests/trino_lake.py)
-      - name: Pull Trino / MinIO images
+      # Spark and the dbt gold models share throwaway Polaris + MinIO (+ Trino) containers (tests/iceberg_lake.py)
+      - name: Pull Polaris / Trino / MinIO images
         run: |
+          docker pull -q apache/polaris:1.7.0
+          docker pull -q curlimages/curl:latest
           docker pull -q trinodb/trino:483
           docker pull -q pgsty/minio:RELEASE.2026-08-04T00-00-00Z
           docker pull -q pgsty/mc:RELEASE.2026-09-16T00-00-00Z

@@ -19,7 +19,7 @@ def _config() -> dict:
         "host": os.getenv("TRINO_HOST", "localhost"),
         "port": int(os.getenv("TRINO_PORT", "8080")),
         "user": os.getenv("TRINO_USER", "admin"),
-        "catalog": os.getenv("TRINO_CATALOG", "delta"),
+        "catalog": os.getenv("TRINO_CATALOG", "lakehouse"),
         "schema": os.getenv("TRINO_SCHEMA", "gold"),
     }
 

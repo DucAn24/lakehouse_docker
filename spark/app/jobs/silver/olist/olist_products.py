@@ -10,20 +10,20 @@ from pyspark.sql.functions import (
 )
 from pyspark.sql.types import IntegerType
 
-from common.config import create_spark_session, get_logger, BRONZE_BUCKET, SILVER_BUCKET
+from common.config import create_spark_session, get_logger
 from common.transforms import extract_cdc_latest
-from common.tables import SILVER_KEYS
+from common.tables import SILVER_KEYS, table_id
 from common.writers import upsert_with_metrics
 
 logger = get_logger("b2s.products")
 
-BRONZE_PRODUCTS_PATH = f"{BRONZE_BUCKET}/olist.public.olist_products/"
-BRONZE_CATEGORY_PATH = f"{BRONZE_BUCKET}/olist.public.product_category_translation/"
-SILVER_PATH = f"{SILVER_BUCKET}/olist_products/"
+BRONZE_PRODUCTS_TABLE = table_id("bronze", "olist_products")
+BRONZE_CATEGORY_TABLE = table_id("bronze", "product_category_translation")
+SILVER_TABLE = table_id("silver", "olist_products")
 
 
 def _build_category_lookup(spark):
-    df = spark.read.format("delta").load(BRONZE_CATEGORY_PATH)
+    df = spark.table(BRONZE_CATEGORY_TABLE)
     df_clean = df.filter(col("op") != "d").select("after.*")
     return df_clean.select(
         trim(col("product_category_name")).alias("cat_name"),
@@ -32,7 +32,7 @@ def _build_category_lookup(spark):
 
 
 def run(spark):
-    df = spark.read.format("delta").load(BRONZE_PRODUCTS_PATH)
+    df = spark.table(BRONZE_PRODUCTS_TABLE)
     df_dedup = extract_cdc_latest(df, key_cols=["product_id"])
 
     df_products = df_dedup.select(
@@ -79,11 +79,11 @@ def run(spark):
         current_timestamp().alias("processed_at"),
     )
 
-    upsert_with_metrics(df_silver, spark, "silver", "olist_products", SILVER_PATH, SILVER_KEYS["olist_products"])
+    upsert_with_metrics(df_silver, spark, "silver", "olist_products", SILVER_TABLE, SILVER_KEYS["olist_products"])
 
 
 if __name__ == "__main__":
-    spark = create_spark_session("B2S_Products", f"{SILVER_BUCKET}/")
+    spark = create_spark_session("B2S_Products")
     try:
         run(spark)
     except Exception:

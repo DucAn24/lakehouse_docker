@@ -1,15 +1,15 @@
-"""Single registry of every lakehouse table: layer -> table name -> Delta path.
+"""Single registry of every lakehouse table: layer -> table name -> Iceberg identifier.
 
-Used by catalog registration (UC + Trino), the data quality gates and VACUUM so the
-three never drift apart. Jobs still own their own read/write paths; when adding a
-table, add it here too.
+Identifiers are `<catalog>.<layer>.<table>` in the Polaris catalog (common.config.CATALOG), the same
+names Spark, Trino/dbt and every other Iceberg client use. Jobs, the data quality gates and table
+maintenance all resolve tables here; when adding a table, add it here too.
 """
 
 from __future__ import annotations
 
-from common.config import BRONZE_BUCKET, GOLD_BUCKET, METRICS_PATH, QUALITY_LOG_PATH, SILVER_BUCKET
+from common.config import CATALOG
 
-# Bronze tables are named after the source table; the Delta folder is the Debezium topic.
+# Bronze tables are named after the source table and fed by its Debezium topic.
 _BRONZE_TOPICS = {
     "olist_orders": "olist.public.olist_orders",
     "olist_customers": "olist.public.olist_customers",
@@ -82,16 +82,19 @@ SILVER_KEYS: dict[str, list[str]] = {
     "click_reviews": ["review_id"],
 }
 
+BRONZE_TOPICS: dict[str, str] = dict(_BRONZE_TOPICS)
+
 TABLES: dict[str, dict[str, str]] = {
-    "bronze": {name: f"{BRONZE_BUCKET}/{topic}/" for name, topic in _BRONZE_TOPICS.items()},
-    "silver": {name: f"{SILVER_BUCKET}/{name}/" for name in _SILVER_TABLES},
-    "gold": {name: f"{GOLD_BUCKET}/{name}/" for name in _GOLD_TABLES},
+    "bronze": {name: f"{CATALOG}.bronze.{name}" for name in _BRONZE_TOPICS},
+    "silver": {name: f"{CATALOG}.silver.{name}" for name in _SILVER_TABLES},
+    "gold": {name: f"{CATALOG}.gold.{name}" for name in _GOLD_TABLES},
 }
 
 LAYERS = tuple(TABLES)
 
 
-def table_path(layer: str, table: str) -> str:
+def table_id(layer: str, table: str) -> str:
+    """Iceberg identifier `<catalog>.<layer>.<table>` of a registered table."""
     return TABLES[layer][table]
 
 
@@ -105,11 +108,13 @@ def select_tables(layer: str, table: str | None = None) -> dict[str, str]:
     return {table: tables[table]}
 
 
-# Pipeline observability Delta tables (written by common.metrics / common.quality), exposed to
-# Trino + Grafana in the `monitoring` schema by jobs/ops/register_monitoring.py. Not a "layer":
-# they have no jobs or DQ rules of their own.
+# Pipeline observability tables (written by common.metrics / common.quality, and by dbt's
+# record_run_metrics hook), read by Trino + Grafana. Not a "layer": they have no jobs or DQ rules
+# of their own.
 MONITORING_SCHEMA = "monitoring"
+METRICS_TABLE = f"{CATALOG}.{MONITORING_SCHEMA}.pipeline_metrics"
+QUALITY_LOG_TABLE = f"{CATALOG}.{MONITORING_SCHEMA}.data_quality_log"
 MONITORING_TABLES: dict[str, str] = {
-    "pipeline_metrics": METRICS_PATH,
-    "data_quality_log": QUALITY_LOG_PATH,
+    "pipeline_metrics": METRICS_TABLE,
+    "data_quality_log": QUALITY_LOG_TABLE,
 }

@@ -86,29 +86,29 @@ def _success(
 
 @tool
 def list_tables() -> Dict[str, Any]:
-    """List all tables available in the gold layer of the Data Lakehouse (delta.gold schema)."""
+    """List all tables available in the gold layer of the Data Lakehouse (lakehouse.gold schema)."""
     try:
-        result = execute_query("SHOW TABLES FROM delta.gold")
+        result = execute_query("SHOW TABLES FROM lakehouse.gold")
         tables = [row[list(row.keys())[0]] for row in result["data"]]
-        return {"tables": tables, "schema": "delta.gold"}
+        return {"tables": tables, "schema": "lakehouse.gold"}
     except Exception as e:
         return {"error": str(e)}
 
 
 @tool
 def describe_table(table_name: str) -> Dict[str, Any]:
-    """Get column names and data types for a table in delta.gold.
+    """Get column names and data types for a table in lakehouse.gold.
 
     Args:
         table_name: Table name without schema prefix, e.g. 'fact_orders' or 'dim_customer'
     """
     try:
-        result = execute_query(f"DESCRIBE delta.gold.{table_name}")
+        result = execute_query(f"DESCRIBE lakehouse.gold.{table_name}")
         columns = [
             {"column": row.get("Column", row.get("column", "")), "type": row.get("Type", row.get("type", ""))}
             for row in result["data"]
         ]
-        return {"table": f"delta.gold.{table_name}", "columns": columns}
+        return {"table": f"lakehouse.gold.{table_name}", "columns": columns}
     except Exception as e:
         return {"error": str(e)}
 
@@ -129,7 +129,7 @@ def run_select_query(
     A LIMIT clause will be added automatically if not present.
     The query is validated by Trino first: on a validation error you get Trino's message and the
     columns of the tables you used, so fix the query and call this tool again.
-    Always use fully-qualified table names: delta.gold.<table_name>.
+    Always use fully-qualified table names: lakehouse.gold.<table_name>.
     The user sees the SQL, the rows and a chart in the UI automatically (a bar or line chart is
     picked from the data). Pass chart_type only when the user asks for a specific chart, or when
     another one clearly fits better; the columns must exist in your SELECT.
@@ -205,7 +205,7 @@ def get_data(api_name: str, limit: int = 50) -> Tuple[str, Optional[dict]]:
 # System prompt — full star schema knowledge baked in
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are a friendly and professional Data Analyst assistant for a Data Lakehouse built on Apache Trino + Delta Lake.
+SYSTEM_PROMPT = """You are a friendly and professional Data Analyst assistant for a Data Lakehouse built on Apache Trino + Apache Iceberg.
 Your name is **LakeBot**. You specialize in answering questions about data, analytics, and business insights using the lakehouse.
 
 ════════════════════════════════════════════════════
@@ -282,7 +282,7 @@ RULES YOU MUST FOLLOW (CRITICAL & STRICT)
    DROP, CREATE, ALTER, TRUNCATE, MERGE, REPLACE, GRANT, or REVOKE.
    If the user asks for a write operation, politely refuse and explain why.
 
-2. Always use fully-qualified table names: delta.gold.<table_name>
+2. Always use fully-qualified table names: lakehouse.gold.<table_name>
 
 3. When unsure about columns, call describe_table first.
 

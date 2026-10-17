@@ -19,13 +19,13 @@ from core.database import execute_query
 
 logger = logging.getLogger(__name__)
 
-GOLD_SCHEMA = "delta.gold"
+GOLD_SCHEMA = "lakehouse.gold"
 DBT_MODELS_DIR = Path(os.getenv("DBT_MODELS_DIR", "/dbt/models"))
 CACHE_TTL_SECONDS = int(os.getenv("SCHEMA_CACHE_TTL", "600"))
 RETRY_AFTER_FAILURE_SECONDS = 30
 
 _REF = re.compile(r"ref\(\s*['\"]([^'\"]+)['\"]\s*\)")
-_GOLD_TABLE = re.compile(r"\bdelta\.gold\.([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
+_GOLD_TABLE = re.compile(r"\blakehouse\.gold\.([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
 
 STATIC_NOTES = """\
 CONVENTIONS
@@ -141,7 +141,7 @@ class SchemaContext:
         return self._prompt or ""
 
     def tables_used_in(self, sql: str) -> Dict[str, List[Dict[str, str]]]:
-        """Columns of the delta.gold tables a query refers to; the model's hint after a failed query."""
+        """Columns of the lakehouse.gold tables a query refers to; the model's hint after a failed query."""
         self._refresh()
         used = {}
         for name in dict.fromkeys(m.lower() for m in _GOLD_TABLE.findall(sql)):

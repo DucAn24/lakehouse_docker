@@ -1,8 +1,8 @@
 apiVersion: 1
 
 datasources:
-  - name: Trino (Delta Lake)
-    uid: trino-delta
+  - name: Trino (Iceberg)
+    uid: trino-lakehouse
     type: trino-datasource
     access: proxy
     url: http://trino:8080

@@ -1,2 +1,2 @@
 SELECT count(*)
-FROM delta.gold.dim_customer
+FROM lakehouse.gold.dim_customer

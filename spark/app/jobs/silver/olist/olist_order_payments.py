@@ -3,18 +3,18 @@ import sys
 from pyspark.sql.functions import col, trim, upper, when, current_timestamp, round as spark_round
 from pyspark.sql.types import DoubleType, IntegerType
 
-from common.config import create_spark_session, get_logger, BRONZE_BUCKET, SILVER_BUCKET
-from common.tables import SILVER_KEYS
+from common.config import create_spark_session, get_logger
+from common.tables import SILVER_KEYS, table_id
 from common.writers import upsert_with_metrics
 
 logger = get_logger("b2s.order_payments")
 
-BRONZE_PATH = f"{BRONZE_BUCKET}/olist.public.olist_order_payments/"
-SILVER_PATH = f"{SILVER_BUCKET}/olist_order_payments/"
+BRONZE_TABLE = table_id("bronze", "olist_order_payments")
+SILVER_TABLE = table_id("silver", "olist_order_payments")
 
 
 def run(spark):
-    df = spark.read.format("delta").load(BRONZE_PATH)
+    df = spark.table(BRONZE_TABLE)
     df_clean = df.filter(col("op") != "d").select("after.*")
 
     df_silver = df_clean.select(
@@ -42,11 +42,11 @@ def run(spark):
         .withColumn("processed_at", current_timestamp())
     )
 
-    upsert_with_metrics(df_silver, spark, "silver", "olist_order_payments", SILVER_PATH, SILVER_KEYS["olist_order_payments"])
+    upsert_with_metrics(df_silver, spark, "silver", "olist_order_payments", SILVER_TABLE, SILVER_KEYS["olist_order_payments"])
 
 
 if __name__ == "__main__":
-    spark = create_spark_session("B2S_OrderPayments", f"{SILVER_BUCKET}/")
+    spark = create_spark_session("B2S_OrderPayments")
     try:
         run(spark)
     except Exception:

@@ -28,6 +28,7 @@ export const catalogAPI = {
   tables:       (layer) => fetchJSON(`${CATALOG_BASE}/tables${layer ? `?layer=${layer}` : ''}`),
   tableDetail:  (layer, table) => fetchJSON(`${CATALOG_BASE}/tables/${layer}/${table}`),
   tableSample:  (layer, table) => fetchJSON(`${CATALOG_BASE}/tables/${layer}/${table}/sample`),
+  tableSnapshots: (layer, table) => fetchJSON(`${CATALOG_BASE}/tables/${layer}/${table}/snapshots`),
   search:       (q) => fetchJSON(`${CATALOG_BASE}/search?q=${encodeURIComponent(q)}`),
   lineage:      () => fetchJSON(`${CATALOG_BASE}/lineage`),
   tableLineage: (table) => fetchJSON(`${CATALOG_BASE}/lineage/${table}`),

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from common.tables import LAYERS, TABLES, select_tables, table_path
+from common.tables import BRONZE_TOPICS, LAYERS, MONITORING_TABLES, TABLES, select_tables, table_id
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "spark" / "app"
@@ -28,15 +28,26 @@ def test_layers_and_counts():
 
 
 @pytest.mark.parametrize("layer", LAYERS)
-def test_paths_are_unique_and_end_with_slash(layer):
-    paths = list(TABLES[layer].values())
-    assert len(paths) == len(set(paths))
-    assert all(p.endswith("/") for p in paths)
+def test_identifiers_are_catalog_layer_table(layer):
+    for table, ident in TABLES[layer].items():
+        assert ident == f"lakehouse.{layer}.{table}"
+    assert table_id(layer, next(iter(TABLES[layer]))) in TABLES[layer].values()
 
 
-def test_bronze_paths_use_debezium_topic_names():
-    assert table_path("bronze", "olist_orders").endswith("/olist.public.olist_orders/")
-    assert table_path("bronze", "click_events").endswith("/clickstream.public.click_events/")
+def test_monitoring_tables_live_in_the_monitoring_namespace():
+    assert set(MONITORING_TABLES.values()) == {"lakehouse.monitoring.pipeline_metrics", "lakehouse.monitoring.data_quality_log"}
+
+
+def test_bronze_tables_map_to_debezium_topics():
+    assert set(BRONZE_TOPICS) == set(TABLES["bronze"])
+    assert BRONZE_TOPICS["olist_orders"] == "olist.public.olist_orders"
+    assert BRONZE_TOPICS["click_events"] == "clickstream.public.click_events"
+
+
+def test_polaris_init_creates_every_namespace():
+    init = (ROOT / "polaris" / "init.sh").read_text(encoding="utf-8")
+    namespaces = init.split('NAMESPACES="', 1)[1].split('"', 1)[0].split()
+    assert set(namespaces) == {*LAYERS, "monitoring"}
 
 
 def test_select_tables():
@@ -55,25 +66,19 @@ def test_every_silver_table_has_one_job_with_entrypoint():
         assert guards, f"silver/{table}: no __main__ entry point for spark-submit"
 
 
-def test_silver_job_paths_match_registry():
-    """The path a job writes must be the path the registry (catalog, DQ, VACUUM) uses."""
-    for table, path in TABLES["silver"].items():
+def test_silver_jobs_write_their_registry_table():
+    """A job must write the table the registry (DQ, maintenance) uses."""
+    for table in TABLES["silver"]:
         source = job_file("silver", table).read_text(encoding="utf-8")
-        suffix = path.rsplit("/", 2)[-2]  # table folder name
-        assert f"/{suffix}/" in source, f"silver/{table}: job does not write to {suffix}/"
+        assert f'table_id("silver", "{table}")' in source, f"silver/{table}: job does not write lakehouse.silver.{table}"
 
 
-def test_every_gold_table_is_a_dbt_model_at_its_registry_path():
-    """dbt pins each model to <gold_location>/<model name> (macro gold_properties), the registry's gold path."""
-    gold_location = yaml.safe_load((DBT / "dbt_project.yml").read_text(encoding="utf-8"))["vars"]["gold_location"]
-    assert gold_location == "s3://gold"  # same bucket as common.config.GOLD_BUCKET (s3a://gold)
+def test_every_gold_table_is_a_dbt_model_in_the_catalog():
+    """Each gold table is a dbt model of the same name, built in <catalog>.gold with the shared properties."""
     models = {p.stem: p for p in (DBT / "models").rglob("*.sql")}
     assert set(models) == set(TABLES["gold"])
-    for table, path in TABLES["gold"].items():
-        assert path.rstrip("/").rsplit("/", 1)[-1] == table
+    for table in TABLES["gold"]:
         assert "properties=gold_properties()" in models[table].read_text(encoding="utf-8"), table
-
-
-@pytest.mark.parametrize("layer", LAYERS)
-def test_register_tables_job_exists(layer):
-    assert (JOBS / layer / "register_tables.py").is_file()
+    profile = yaml.safe_load((DBT / "profiles.yml").read_text(encoding="utf-8"))["lakehouse"]["outputs"]["prod"]
+    assert "'lakehouse'" in profile["database"] and profile["schema"] == "gold"
+    assert '"format_version": "2"' in (DBT / "macros" / "keys.sql").read_text(encoding="utf-8")

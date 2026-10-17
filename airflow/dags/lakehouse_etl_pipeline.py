@@ -4,7 +4,7 @@ lakehouse_etl_pipeline
 Full medallion ETL pipeline for the e-commerce data lakehouse (Olist + Clickstream).
 
 Stage 1 – Kafka → Bronze
-    Reads all Debezium CDC topics from Kafka and writes Delta tables to MinIO.
+    Reads all Debezium CDC topics from Kafka and writes Iceberg tables (Polaris catalog `lakehouse`, data on MinIO).
 
 Stage 2 – Bronze → Silver  (runs after the Bronze quality gate)
     Cleans, types, and enriches each domain entity.
@@ -33,8 +33,7 @@ from airflow.sdk import TaskGroup
 
 from alerting import notify_failure
 from gold_tasks import dbt_build
-from spark_submit_defaults import BRONZE_JOBS, SILVER_JOBS, OPS_JOBS, common_kwargs, dq_kwargs, register_kwargs
-from monitoring_tasks import finish_with_monitoring
+from spark_submit_defaults import BRONZE_JOBS, SILVER_JOBS, OPS_JOBS, common_kwargs, dq_kwargs
 
 # ---------------------------------------------------------------------------
 # Default task arguments
@@ -73,14 +72,9 @@ with DAG(
             ),
         )
 
-        register_bronze_tables = SparkSubmitOperator(
-            task_id="register_bronze_tables",
-            **register_kwargs("bronze"),
-        )
-
         dq_bronze = SparkSubmitOperator(task_id="dq_bronze", **dq_kwargs("bronze"))
 
-        kafka_to_bronze >> register_bronze_tables >> dq_bronze
+        kafka_to_bronze >> dq_bronze
 
     # =========================================================================
     # Stage 2: Bronze → Silver
@@ -145,11 +139,6 @@ with DAG(
             **common_kwargs("B2S_ClickReviews", f"{SILVER_JOBS}/clickstream/click_reviews.py"),
         )
 
-        register_silver_tables = SparkSubmitOperator(
-            task_id="register_silver_tables",
-            **register_kwargs("silver"),
-        )
-
         # Run the Spark jobs one after another to keep RAM usage low.
         silver_tasks = [
             b2s_customers,
@@ -174,7 +163,7 @@ with DAG(
 
         dq_silver = SparkSubmitOperator(task_id="dq_silver", **dq_kwargs("silver"))
 
-        silver_tasks[-1] >> register_silver_tables >> dq_silver
+        silver_tasks[-1] >> dq_silver
 
     # =========================================================================
     # Stage 3: Silver → Gold  (dbt on Trino, repo `dbt/`)
@@ -182,14 +171,9 @@ with DAG(
     with TaskGroup("silver_to_gold") as gold_group:
         dbt_build_gold = dbt_build()
 
-        register_gold_tables = SparkSubmitOperator(
-            task_id="register_gold_tables",
-            **register_kwargs("gold"),
-        )
-
         dq_gold = SparkSubmitOperator(task_id="dq_gold", **dq_kwargs("gold"))
 
-        dbt_build_gold >> register_gold_tables >> dq_gold
+        dbt_build_gold >> dq_gold
 
     # =========================================================================
     # Cross-group dependencies
@@ -198,16 +182,14 @@ with DAG(
     dq_silver >> dbt_build_gold
 
     # =========================================================================
-    # Stage 4: Vacuum / Cleanup (Giúp giải phóng ổ cứng)
+    # Stage 4: Iceberg maintenance (expire snapshots, remove orphan files) — frees MinIO space
     # =========================================================================
-    vacuum_delta_tables = SparkSubmitOperator(
-        task_id="vacuum_delta_tables",
+    maintain_iceberg_tables = SparkSubmitOperator(
+        task_id="maintain_iceberg_tables",
         **common_kwargs(
-            "LakehouseVacuum",
-            f"{OPS_JOBS}/vacuum_tables.py",
+            "LakehouseMaintenance",
+            f"{OPS_JOBS}/maintain_tables.py",
         ),
     )
 
-    gold_group >> vacuum_delta_tables
-
-    finish_with_monitoring(vacuum_delta_tables)
+    gold_group >> maintain_iceberg_tables

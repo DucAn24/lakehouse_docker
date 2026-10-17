@@ -13,16 +13,16 @@ from pyspark.sql.functions import (
 from pyspark.sql.types import DoubleType
 from pyspark.sql.window import Window
 
-from common.config import create_spark_session, get_logger, BRONZE_BUCKET, SILVER_BUCKET
+from common.config import create_spark_session, get_logger
 from common.transforms import extract_cdc_latest
-from common.tables import SILVER_KEYS
+from common.tables import SILVER_KEYS, table_id
 from common.writers import upsert_with_metrics
 
 logger = get_logger("b2s.customers")
 
-BRONZE_CUSTOMERS_PATH = f"{BRONZE_BUCKET}/olist.public.olist_customers/"
-BRONZE_GEO_PATH = f"{BRONZE_BUCKET}/olist.public.olist_geolocation/"
-SILVER_PATH = f"{SILVER_BUCKET}/olist_customers/"
+BRONZE_CUSTOMERS_TABLE = table_id("bronze", "olist_customers")
+BRONZE_GEO_TABLE = table_id("bronze", "olist_geolocation")
+SILVER_TABLE = table_id("silver", "olist_customers")
 
 REGION_MAP = {
     "SP": "SUDESTE",
@@ -56,7 +56,7 @@ REGION_MAP = {
 
 
 def _build_geo_lookup(spark):
-    df = spark.read.format("delta").load(BRONZE_GEO_PATH)
+    df = spark.table(BRONZE_GEO_TABLE)
     df_clean = df.filter(col("op") != "d").select("after.*")
 
     df_typed = df_clean.select(
@@ -79,7 +79,7 @@ def _build_geo_lookup(spark):
 
 
 def run(spark):
-    df = spark.read.format("delta").load(BRONZE_CUSTOMERS_PATH)
+    df = spark.table(BRONZE_CUSTOMERS_TABLE)
     df_dedup = extract_cdc_latest(df, key_cols=["customer_id"])
 
     df_customers = df_dedup.select(
@@ -116,11 +116,11 @@ def run(spark):
         current_timestamp().alias("processed_at"),
     )
 
-    upsert_with_metrics(df_silver, spark, "silver", "olist_customers", SILVER_PATH, SILVER_KEYS["olist_customers"])
+    upsert_with_metrics(df_silver, spark, "silver", "olist_customers", SILVER_TABLE, SILVER_KEYS["olist_customers"])
 
 
 if __name__ == "__main__":
-    spark = create_spark_session("B2S_Customers", f"{SILVER_BUCKET}/")
+    spark = create_spark_session("B2S_Customers")
     try:
         run(spark)
     except Exception:

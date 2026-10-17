@@ -1,13 +1,13 @@
 {% macro record_run_metrics(results) %}
-    {#- on-run-end: append one row per model run to monitoring.pipeline_metrics, the Delta table the
+    {#- on-run-end: append one row per model run to monitoring.pipeline_metrics, the Iceberg table the
         Spark jobs record into (common/metrics.py) and the Grafana Pipeline Monitoring dashboard reads.
-        Like common.metrics, this never fails the run: it is skipped until register_monitoring has
-        exposed the table to Trino or when the table lacks a column. -#}
+        Like common.metrics, this never fails the run: it is skipped until a Spark job has created
+        the table or when the table lacks a column. -#}
     {% if not execute %}{{ return('') }}{% endif %}
 
     {% set metrics = adapter.get_relation(database=target.database, schema='monitoring', identifier='pipeline_metrics') %}
     {% if metrics is none %}
-        {{ log('monitoring.pipeline_metrics is not registered in Trino yet -- gold run metrics skipped', info=true) }}
+        {{ log('monitoring.pipeline_metrics does not exist yet -- gold run metrics skipped', info=true) }}
         {{ return('') }}
     {% endif %}
 

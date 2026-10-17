@@ -1,12 +1,13 @@
 from common.config import create_spark_session
+from common.tables import table_id
 
-spark = create_spark_session("Show Customers", "s3a://silver/")
+spark = create_spark_session("Show Customers")
 
 print("\n" + "=" * 100)
 print(" " * 35 + "OLIST CUSTOMERS - SILVER LAYER")
 print("=" * 100)
 
-customers = spark.read.format("delta").load("s3a://silver/olist_customers")
+customers = spark.table(table_id("silver", "olist_customers"))
 
 # Show schema
 print("\n📋 SCHEMA:")

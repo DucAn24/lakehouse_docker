@@ -5,8 +5,8 @@ Standalone Gold DAG for the lakehouse.
 
 Builds the star schema (dimensions + facts) from the silver tables with dbt on Trino
 (repo `dbt/`): `dbt build` runs every model in dependency order together with its data
-tests. The tables are then registered in Unity Catalog and pass the gold DQ gate, whose
-results feed the Grafana Pipeline Monitoring dashboard.
+tests, writing Iceberg tables straight into the Polaris catalog. They then pass the gold
+DQ gate, whose results feed the Grafana Pipeline Monitoring dashboard.
 """
 
 from __future__ import annotations
@@ -18,8 +18,7 @@ from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOpe
 
 from alerting import notify_failure
 from gold_tasks import dbt_build
-from spark_submit_defaults import dq_kwargs, register_kwargs
-from monitoring_tasks import finish_with_monitoring
+from spark_submit_defaults import dq_kwargs
 
 DEFAULT_ARGS = {
     "owner": "data-engineering",
@@ -43,13 +42,6 @@ with DAG(
 ) as dag:
     dbt_build_gold = dbt_build()
 
-    register_gold_tables = SparkSubmitOperator(
-        task_id="register_gold_tables",
-        **register_kwargs("gold"),
-    )
-
     dq_gold = SparkSubmitOperator(task_id="dq_gold", **dq_kwargs("gold"))
 
-    dbt_build_gold >> register_gold_tables >> dq_gold
-
-    finish_with_monitoring(dq_gold)
+    dbt_build_gold >> dq_gold

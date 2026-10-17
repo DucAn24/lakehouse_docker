@@ -2,8 +2,9 @@
 # E-Commerce & Clickstream Lakehouse — Docker Compose
 # ==========================================
 # Bản chuyển đổi từ Helm chart (helm/lakehouse) sang Docker Compose.
-#   docker compose up -d                  → core ETL stack (Postgres, MinIO, Kafka, Debezium, Unity Catalog, Trino, Spark, Airflow)
-#   docker compose --profile apps up -d   → thêm Metabase, Grafana, Kafka UI, FastAPI chatbot
+#   docker compose up -d                  → core ETL stack (Postgres, MinIO, Kafka, Debezium, Polaris, Trino, Spark, Airflow)
+#   docker compose --profile apps up -d   → thêm Metabase, Grafana, Kafka UI, FastAPI chatbot, Catalog API, Portal, Polaris Console
+# Bảng: Apache Iceberg; catalog: Apache Polaris (Iceberg REST) tên `lakehouse`, dùng chung cho Spark, Trino, PyIceberg, DuckDB...
 # Biến môi trường lấy từ .env (copy từ .env.example).
 # ==========================================
 
@@ -17,15 +18,25 @@ x-common-env: &common-env
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-password123}
   AWS_REGION: ${AWS_REGION:-us-east-1}
   S3_ENDPOINT: http://minio:9000
-  UC_URI: http://unitycatalog:8080
-  UC_CATALOG: lakehouse
+  POLARIS_URI: http://polaris:8181/api/catalog
+  POLARIS_CLIENT_ID: ${POLARIS_ROOT_CLIENT_ID:-root}
+  POLARIS_CLIENT_SECRET: ${POLARIS_ROOT_CLIENT_SECRET:-s3cr3t}
+  ICEBERG_CATALOG: lakehouse
   KAFKA_BROKER: kafka:9092
   KAFKA_BOOTSTRAP_SERVERS: kafka:9092
   TRINO_HOST: trino
   TRINO_PORT: "8080"
-  TRINO_CATALOG: delta
+  TRINO_CATALOG: lakehouse
   TRINO_SCHEMA: gold
   TRINO_USER: admin
+
+# Polaris lưu metadata trong database `polaris` của service postgres (relational-jdbc)
+x-polaris-db-env: &polaris-db-env
+  POLARIS_PERSISTENCE_TYPE: relational-jdbc
+  POLARIS_PERSISTENCE_RELATIONAL_JDBC_DATABASE_TYPE: postgresql
+  QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/polaris
+  QUARKUS_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+  QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-123456}
 
 x-spark-image: &spark-image
   build: ./spark
@@ -68,10 +79,7 @@ services:
 
   minio-init:
     image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z
-    environment:
-      <<: *common-env
-      UC_S3_ACCESS_KEY: ${UC_S3_ACCESS_KEY:-unitycatalog}
-      UC_S3_SECRET_KEY: ${UC_S3_SECRET_KEY:-unitycatalog123}
+    environment: *common-env
     depends_on:
       minio: { condition: service_healthy }
     entrypoint: ["/bin/sh", "-c"]
@@ -80,15 +88,9 @@ services:
         until mc alias set myminio http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD; do
           echo "  → MinIO not ready, retrying in 5s..."; sleep 5
         done
-        mc mb myminio/bronze --ignore-existing
-        mc mb myminio/silver --ignore-existing
-        mc mb myminio/gold --ignore-existing
-        mc mb myminio/trino-metastore --ignore-existing
-        echo "✓ All buckets created: bronze, silver, gold, trino-metastore"
-        # User riêng cho Unity Catalog: MinIO không cho root user gọi STS AssumeRole
-        mc admin user add myminio $$UC_S3_ACCESS_KEY $$UC_S3_SECRET_KEY
-        mc admin policy attach myminio readwrite --user $$UC_S3_ACCESS_KEY || true
-        echo "✓ Unity Catalog MinIO user ready: $$UC_S3_ACCESS_KEY"
+        # Một bucket cho cả lakehouse: Polaris đặt bảng ở s3://lakehouse/<namespace>/<table>
+        mc mb myminio/lakehouse --ignore-existing
+        echo "✓ Bucket created: lakehouse"
     restart: "no"
 
   kafka:
@@ -158,58 +160,86 @@ services:
     entrypoint: ["/bin/sh", "/connectors/register-connectors.sh"]
     restart: "no"
 
-  # Unity Catalog OSS — catalog cho Spark (thay Hive Metastore).
-  # Metadata lưu H2 trong volume uc-data (image không kèm JDBC driver Postgres).
-  # Credential vending: UC gọi STS AssumeRole của MinIO (AWS_ENDPOINT_URL_STS) bằng user UC_S3_*.
-  unitycatalog:
-    image: unitycatalog/unitycatalog:v0.6.0
+  # Apache Polaris — Iceberg REST catalog `lakehouse` dùng chung cho mọi engine.
+  # Không vend credential (MinIO, stsUnavailable): client dùng key MinIO của chính nó.
+  polaris-db-init:
+    image: postgres:15-alpine
     environment:
-      AWS_ENDPOINT_URL_STS: http://minio:9000
-      s3.accessKey.0: ${UC_S3_ACCESS_KEY:-unitycatalog}
-      s3.secretKey.0: ${UC_S3_SECRET_KEY:-unitycatalog123}
-      s3.accessKey.1: ${UC_S3_ACCESS_KEY:-unitycatalog}
-      s3.secretKey.1: ${UC_S3_SECRET_KEY:-unitycatalog123}
-      s3.accessKey.2: ${UC_S3_ACCESS_KEY:-unitycatalog}
-      s3.secretKey.2: ${UC_S3_SECRET_KEY:-unitycatalog123}
-    ports: ["8086:8080"]
-    volumes:
-      - ./unitycatalog/server.properties:/home/unitycatalog/etc/conf/server.properties:ro
-      - ./data/uc:/home/unitycatalog/etc/db
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-123456}
+      PGDATABASE: ${POSTGRES_DB:-orders}
     depends_on:
-      minio-init: { condition: service_completed_successfully }
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/2.1/unity-catalog/catalogs > /dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-    mem_limit: ${UC_MEM_LIMIT:-768m}
-    restart: unless-stopped
-
-  uc-init:
-    image: curlimages/curl:latest
-    depends_on:
-      unitycatalog: { condition: service_healthy }
+      postgres: { condition: service_healthy }
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        UC=http://unitycatalog:8080/api/2.1/unity-catalog
-        if curl -sf $$UC/catalogs/lakehouse > /dev/null; then
-          echo "✓ Catalog 'lakehouse' already exists"
-        else
-          curl -sf -X POST $$UC/catalogs -H 'Content-Type: application/json'             -d '{"name": "lakehouse", "comment": "E-commerce & clickstream lakehouse"}' && echo
-          echo "✓ Catalog 'lakehouse' created"
-        fi
+        # init-databases.sh chỉ chạy khi volume postgres còn trống → tạo DB polaris nếu thiếu
+        psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'polaris'" | grep -q 1           || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE polaris"
+        echo "✓ Database polaris ready"
     restart: "no"
 
-  # Pin version: catalog delta dùng file metastore (hive.metastore=file), không có trong docs Trino
+  polaris-bootstrap:
+    image: apache/polaris-admin-tool:${POLARIS_VERSION:-1.7.0}
+    environment: *polaris-db-env
+    # Idempotent: realm đã bootstrap thì bỏ qua (credential root giữ nguyên)
+    command:
+      - bootstrap
+      - --realm=POLARIS
+      - --credential=POLARIS,${POLARIS_ROOT_CLIENT_ID:-root},${POLARIS_ROOT_CLIENT_SECRET:-s3cr3t}
+    depends_on:
+      polaris-db-init: { condition: service_completed_successfully }
+    restart: "no"
+
+  polaris:
+    image: apache/polaris:${POLARIS_VERSION:-1.7.0}
+    environment:
+      <<: *polaris-db-env
+      POLARIS_REALM_CONTEXT_REALMS: POLARIS
+      QUARKUS_OTEL_SDK_DISABLED: "true"
+      polaris.readiness.ignore-severe-issues: "true"
+      # Polaris tự ghi metadata.json lên MinIO bằng key này (endpointInternal của catalog)
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-admin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-password123}
+      # Polaris Console (profile apps) gọi API thẳng từ trình duyệt
+      QUARKUS_HTTP_CORS_ENABLED: "true"
+      QUARKUS_HTTP_CORS_ORIGINS: http://localhost:8088
+      QUARKUS_HTTP_CORS_METHODS: GET,POST,PUT,DELETE,PATCH,HEAD,OPTIONS
+      QUARKUS_HTTP_CORS_HEADERS: "*"
+    ports: ["8181:8181", "8182:8182"]
+    depends_on:
+      polaris-bootstrap: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "-s", "http://localhost:8182/q/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: ${POLARIS_MEM_LIMIT:-768m}
+    restart: unless-stopped
+
+  # Tạo catalog `lakehouse`, quyền, namespace bronze/silver/gold/monitoring (idempotent)
+  polaris-init:
+    image: curlimages/curl:latest
+    environment: *common-env
+    volumes:
+      - ./polaris/init.sh:/polaris/init.sh:ro
+    depends_on:
+      polaris: { condition: service_healthy }
+    entrypoint: ["/bin/sh", "/polaris/init.sh"]
+    restart: "no"
+
   trino:
     image: trinodb/trino:483
+    environment: *common-env  # lakehouse.properties đọc key Polaris/MinIO từ biến môi trường (ENV:...)
     ports: ["8081:8080"]
     volumes:
       - ./trino/config.properties:/etc/trino/config.properties:ro
-      - ./trino/catalog/delta.properties:/etc/trino/catalog/delta.properties:ro
+      - ./trino/catalog/lakehouse.properties:/etc/trino/catalog/lakehouse.properties:ro
     depends_on:
-      minio-init: { condition: service_completed_successfully }
+      polaris-init: { condition: service_completed_successfully }
     mem_limit: ${TRINO_MEM_LIMIT:-1500m}
     restart: unless-stopped
 
@@ -282,7 +312,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       spark-master: { condition: service_started }
-      uc-init: { condition: service_completed_successfully }
+      polaris-init: { condition: service_completed_successfully }
     mem_limit: ${AIRFLOW_MEM_LIMIT:-2g}
     restart: unless-stopped
 
@@ -380,7 +410,7 @@ services:
       - ./spark/app/common:/common:ro
     depends_on:
       - trino
-      - unitycatalog
+      - polaris
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
       interval: 10s
@@ -398,4 +428,25 @@ services:
       - catalog-api
       - fastapi
     mem_limit: ${PORTAL_MEM_LIMIT:-256m}
+    restart: unless-stopped
+
+  # Web UI của Polaris (catalog, namespace, bảng, principal/role). Chưa có image chính thức →
+  # build từ apache/polaris-tools, pin commit. Đăng nhập bằng POLARIS_ROOT_CLIENT_ID/SECRET.
+  polaris-console:
+    build:
+      context: https://github.com/apache/polaris-tools.git#8ffe1e52ed78579a815905d8414702d1082e5a18:console
+      dockerfile: docker/Dockerfile
+    image: ${POLARIS_CONSOLE_IMAGE:-lakehouse-polaris-console:latest}
+    profiles: ["apps"]
+    environment:
+      # Trình duyệt gọi thẳng Polaris → dùng cổng publish trên host (CORS đã mở cho :8088)
+      VITE_POLARIS_API_URL: http://localhost:8181
+      VITE_OAUTH_TOKEN_URL: http://localhost:8181/api/catalog/v1/oauth/tokens
+      VITE_POLARIS_REALM: POLARIS
+      VITE_POLARIS_REALM_HEADER_NAME: Polaris-Realm
+      VITE_POLARIS_PRINCIPAL_SCOPE: PRINCIPAL_ROLE:ALL
+    ports: ["8088:8080"]
+    depends_on:
+      - polaris
+    mem_limit: ${POLARIS_CONSOLE_MEM_LIMIT:-256m}
     restart: unless-stopped

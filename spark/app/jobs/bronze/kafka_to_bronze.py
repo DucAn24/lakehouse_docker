@@ -11,9 +11,14 @@ from pyspark.sql.types import (
     LongType,
 )
 
-from common.config import create_spark_session, get_logger, KAFKA_BOOTSTRAP, BRONZE_BUCKET
+from common.catalog import create_or_replace
+from common.config import create_spark_session, get_logger, KAFKA_BOOTSTRAP
+from common.tables import BRONZE_TOPICS, table_id
 
 logger = get_logger("kafka_to_bronze")
+
+# Debezium topic -> bronze table name (lakehouse.bronze.<name>)
+TOPIC_TABLES = {topic: name for name, topic in BRONZE_TOPICS.items()}
 
 # ---------------------------------------------------------------------------
 # Debezium CDC table schemas
@@ -191,7 +196,7 @@ SCHEMAS: dict[str, StructType] = {
 
 
 def process_topic_batch(spark, topic_name: str, table_schema: StructType):
-    """Read a single Kafka topic in batch mode and write to Bronze as Delta."""
+    """Read a single Kafka topic in batch mode and write it to its Bronze Iceberg table."""
     logger.info("Processing topic: %s", topic_name)
 
     cdc_payload_schema = StructType(
@@ -241,11 +246,11 @@ def process_topic_batch(spark, topic_name: str, table_schema: StructType):
         )
     )
 
-    bronze_path = f"{BRONZE_BUCKET}/{topic_name}/"
+    bronze_table = table_id("bronze", TOPIC_TABLES[topic_name])
 
     try:
-        df_parsed.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(bronze_path)
-        logger.info("Overwrote records in %s", topic_name)
+        create_or_replace(df_parsed, bronze_table)
+        logger.info("Overwrote %s with %s", bronze_table, topic_name)
     except Exception:
         logger.exception("Failed to write to %s", topic_name)
         raise
@@ -259,7 +264,7 @@ if __name__ == "__main__":
     parser.add_argument("--table", help="Single topic name to process (e.g. olist.public.olist_orders)")
     args = parser.parse_args()
 
-    spark = create_spark_session("OlistKafkaToBronzeBatch", f"{BRONZE_BUCKET}/")
+    spark = create_spark_session("OlistKafkaToBronzeBatch")
 
     try:
         if args.table:

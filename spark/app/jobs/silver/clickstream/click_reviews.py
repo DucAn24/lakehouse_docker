@@ -3,19 +3,19 @@ import sys
 from pyspark.sql.functions import col, trim, current_timestamp, to_timestamp, when, coalesce, from_unixtime
 from pyspark.sql.types import IntegerType
 
-from common.config import create_spark_session, get_logger, BRONZE_BUCKET, SILVER_BUCKET
+from common.config import create_spark_session, get_logger
 from common.transforms import extract_cdc_latest
-from common.tables import SILVER_KEYS
+from common.tables import SILVER_KEYS, table_id
 from common.writers import upsert_with_metrics
 
 logger = get_logger("b2s.click_reviews")
 
-BRONZE_PATH = f"{BRONZE_BUCKET}/clickstream.public.click_reviews/"
-SILVER_PATH = f"{SILVER_BUCKET}/click_reviews/"
+BRONZE_TABLE = table_id("bronze", "click_reviews")
+SILVER_TABLE = table_id("silver", "click_reviews")
 
 
 def run(spark):
-    df = spark.read.format("delta").load(BRONZE_PATH)
+    df = spark.table(BRONZE_TABLE)
     df_dedup = extract_cdc_latest(df, key_cols=["review_id"])
 
     # Cast fields and calculate sentiment based on rating (1-5 scale)
@@ -42,11 +42,11 @@ def run(spark):
         current_timestamp().alias("processed_at"),
     ).filter(col("review_id").isNotNull())
 
-    upsert_with_metrics(df_silver, spark, "silver", "click_reviews", SILVER_PATH, SILVER_KEYS["click_reviews"])
+    upsert_with_metrics(df_silver, spark, "silver", "click_reviews", SILVER_TABLE, SILVER_KEYS["click_reviews"])
 
 
 if __name__ == "__main__":
-    spark = create_spark_session("B2S_ClickReviews", f"{SILVER_BUCKET}/")
+    spark = create_spark_session("B2S_ClickReviews")
     try:
         run(spark)
     except Exception:

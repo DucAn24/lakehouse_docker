@@ -1,35 +1,24 @@
-"""Catalog registration: Unity Catalog (Spark) + Trino file metastore.
+"""Iceberg catalog helpers (Polaris REST catalog `lakehouse`) + a minimal Trino client.
 
-Spark writes Delta by path; each layer's ``jobs/<layer>/register_tables.py`` then
-registers every table of ``common.tables.TABLES`` as an EXTERNAL table in both catalogs.
+Spark, Trino/dbt and every other Iceberg client share one catalog, so a table exists for all of
+them as soon as it is written — there is no registration step.
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import logging
-import sys
 import urllib.request
 
-from pyspark.sql import SparkSession
+from pyspark.errors import AnalysisException
+from pyspark.sql import DataFrame, SparkSession
 
-from common.config import (
-    TRINO_DELTA_CATALOG,
-    TRINO_URL,
-    TRINO_USER,
-    UC_CATALOG,
-    create_spark_session,
-    get_logger,
-)
-from common.tables import LAYERS, select_tables
+from common.config import TRINO_URL, TRINO_USER
 
 logger = logging.getLogger(__name__)
 
-
-def _to_s3_uri(path: str) -> str:
-    """Normalize s3a://bucket/x/ to s3://bucket/x (the only S3 scheme Unity Catalog accepts)."""
-    return "s3://" + path.split("://", 1)[1].rstrip("/")
+# Iceberg spec v2: readable and writable by every engine in the stack (Trino, PyIceberg, DuckDB)
+TABLE_PROPERTIES = {"format-version": "2"}
 
 
 def trino_execute(sql: str, url: str = TRINO_URL) -> list[list]:
@@ -53,81 +42,36 @@ def trino_execute(sql: str, url: str = TRINO_URL) -> list[list]:
         request = urllib.request.Request(next_uri, headers={"X-Trino-User": TRINO_USER})
 
 
-def register_catalog_tables(
-    spark: SparkSession,
-    database: str,
-    tables_config: dict[str, str],
-) -> tuple[int, int]:
-    """Register Delta tables in Unity Catalog (Spark) and Trino's file metastore.
+def ensure_namespace(spark: SparkSession, table: str) -> None:
+    """Create the namespace of `<catalog>.<namespace>.<table>` if missing.
 
-    UC tables are dropped and recreated so their column metadata follows schema
-    changes (DROP on an external table keeps the data). Trino reads the schema
-    from the Delta log at query time, so only missing tables are registered there.
-
-    Returns (registered_count, failed_count).
+    polaris-init creates the standard namespaces up front; this keeps fresh catalogs (tests) working.
     """
-    uc_schema = f"{UC_CATALOG}.{database}"
-    trino_schema = f"{TRINO_DELTA_CATALOG}.{database}"
-    spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {uc_schema}")
-    trino_execute(f"CREATE SCHEMA IF NOT EXISTS {trino_schema}")
-    trino_tables = {row[0] for row in trino_execute(f"SHOW TABLES FROM {trino_schema}")}
+    namespace = table.rsplit(".", 1)[0]
+    spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {namespace}")
 
-    registered, failed = 0, 0
-    for table_name, path in tables_config.items():
-        location = _to_s3_uri(path)
+
+def create_or_replace(df: DataFrame, table: str, properties: dict[str, str] | None = None) -> None:
+    """Write `df` as the new content and schema of `table` (a new snapshot if it already exists)."""
+    ensure_namespace(df.sparkSession, table)
+    writer = df.writeTo(table).using("iceberg")
+    for key, value in {**TABLE_PROPERTIES, **(properties or {})}.items():
+        writer = writer.tableProperty(key, value)
+    writer.createOrReplace()
+
+
+def append_rows(df: DataFrame, table: str) -> None:
+    """Append `df` to `table`, creating it on first write; new columns in `df` are added to the table."""
+    spark = df.sparkSession
+    if not spark.catalog.tableExists(table):
+        ensure_namespace(spark, table)
+        writer = df.writeTo(table).using("iceberg")
+        for key, value in {**TABLE_PROPERTIES, "write.spark.accept-any-schema": "true"}.items():
+            writer = writer.tableProperty(key, value)
         try:
-            spark.sql(f"DROP TABLE IF EXISTS {uc_schema}.{table_name}")
-            spark.sql(f"""
-                CREATE TABLE {uc_schema}.{table_name}
-                USING DELTA
-                LOCATION '{location}'
-            """)
-            if table_name not in trino_tables:
-                trino_execute(f"""
-                    CALL {TRINO_DELTA_CATALOG}.system.register_table(
-                        schema_name => '{database}',
-                        table_name => '{table_name}',
-                        table_location => '{location}'
-                    )
-                """)
-            logger.info("Registered %s.%s -> %s", database, table_name, location)
-            registered += 1
-        except Exception:
-            logger.exception("Failed to register %s.%s", database, table_name)
-            failed += 1
-
-    spark.sql(f"SHOW TABLES IN {uc_schema}").show(truncate=False)
-    logger.info(
-        "Catalog registration for [%s]: %d success, %d failed",
-        database,
-        registered,
-        failed,
-    )
-    return registered, failed
-
-
-def main(layer: str) -> None:
-    """CLI entry for jobs/<layer>/register_tables.py: register all (or --table) tables of a layer."""
-    assert layer in LAYERS, layer
-    log = get_logger(f"{layer}.register_tables")
-    parser = argparse.ArgumentParser(description=f"Register {layer} Delta tables in Unity Catalog + Trino")
-    parser.add_argument("--table", help=f"Register only this single {layer} table")
-    args = parser.parse_args()
-
-    try:
-        targets = select_tables(layer, args.table)
-    except KeyError as exc:
-        log.error("%s", exc)
-        sys.exit(1)
-
-    spark = create_spark_session(f"{layer.capitalize()}_RegisterTables", f"s3a://{layer}/")
-    try:
-        _, failed = register_catalog_tables(spark, layer, targets)
-        if failed:
-            sys.exit(1)
-        log.info("%s catalog registration completed", layer.capitalize())
-    except Exception:
-        log.exception("Failed")
-        sys.exit(1)
-    finally:
-        spark.stop()
+            writer.create()
+            return
+        except AnalysisException:
+            # Created concurrently by another job: fall through to append
+            logger.info("%s was created concurrently, appending", table)
+    df.writeTo(table).option("mergeSchema", "true").append()

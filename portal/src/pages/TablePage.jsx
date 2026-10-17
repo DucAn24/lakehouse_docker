@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { catalogAPI } from '../api'
 import ColumnTable from '../components/ColumnTable'
 import SampleData from '../components/SampleData'
+import Snapshots from '../components/Snapshots'
 import DQBadge from '../components/DQBadge'
 
 export default function TablePage() {
@@ -70,6 +71,12 @@ export default function TablePage() {
               <SampleData layer={layer} table={table} />
             </div>
           )}
+
+          {/* Iceberg snapshots (PyIceberg via the catalog API) */}
+          <div className="detail-card glass-card" style={{ marginTop: 16 }}>
+            <h3>Snapshots</h3>
+            <Snapshots layer={layer} table={table} />
+          </div>
         </div>
 
         {/* Sidebar: metadata */}
@@ -106,6 +113,12 @@ export default function TablePage() {
 
           <div className="detail-card glass-card">
             <h3>Storage</h3>
+            {info.identifier && (
+              <div className="detail-stat">
+                <span className="label">Iceberg table</span>
+                <span className="value" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem' }}>{info.identifier}</span>
+              </div>
+            )}
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: 'var(--text-secondary)', wordBreak: 'break-all' }}>
               {info.path}
             </div>

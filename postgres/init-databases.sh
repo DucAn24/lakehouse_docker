@@ -5,9 +5,10 @@ set -e
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
     CREATE DATABASE airflow;
     CREATE DATABASE metabase;
+    CREATE DATABASE polaris;
 EOSQL
 
-echo "Additional databases created: airflow, metabase"
+echo "Additional databases created: airflow, metabase, polaris"
 
 # Create Olist tables in the orders database
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'EOSQL'

@@ -34,7 +34,7 @@
       "title": "Customers",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 0,
@@ -47,10 +47,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT COUNT(*) AS customers FROM delta.gold.dim_customer"
+          "rawSQL": "SELECT COUNT(*) AS customers FROM lakehouse.gold.dim_customer"
         }
       ],
       "fieldConfig": {
@@ -76,7 +76,7 @@
       "title": "Products",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 4,
@@ -89,10 +89,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT COUNT(DISTINCT product_id) AS products FROM delta.gold.dim_product"
+          "rawSQL": "SELECT COUNT(DISTINCT product_id) AS products FROM lakehouse.gold.dim_product"
         }
       ],
       "fieldConfig": {
@@ -118,7 +118,7 @@
       "title": "Orders",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 8,
@@ -131,10 +131,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT COUNT(DISTINCT order_id) AS orders FROM delta.gold.fact_orders"
+          "rawSQL": "SELECT COUNT(DISTINCT order_id) AS orders FROM lakehouse.gold.fact_orders"
         }
       ],
       "fieldConfig": {
@@ -160,7 +160,7 @@
       "title": "Total revenue (BRL)",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 12,
@@ -173,10 +173,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT ROUND(SUM(total_item_value), 2) AS revenue FROM delta.gold.fact_orders"
+          "rawSQL": "SELECT ROUND(SUM(total_item_value), 2) AS revenue FROM lakehouse.gold.fact_orders"
         }
       ],
       "fieldConfig": {
@@ -205,7 +205,7 @@
       "title": "Avg review score",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 18,
@@ -218,10 +218,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT ROUND(AVG(review_score), 2) AS avg_score FROM delta.gold.fact_reviews"
+          "rawSQL": "SELECT ROUND(AVG(review_score), 2) AS avg_score FROM lakehouse.gold.fact_reviews"
         }
       ],
       "fieldConfig": {
@@ -251,7 +251,7 @@
       "title": "Monthly revenue",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 0,
@@ -264,10 +264,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT d.year_month AS month, ROUND(SUM(f.total_item_value), 2) AS revenue\nFROM delta.gold.fact_orders f\nJOIN delta.gold.dim_date d ON f.date_sk = d.date_sk\nGROUP BY d.year_month\nORDER BY d.year_month"
+          "rawSQL": "SELECT d.year_month AS month, ROUND(SUM(f.total_item_value), 2) AS revenue\nFROM lakehouse.gold.fact_orders f\nJOIN lakehouse.gold.dim_date d ON f.date_sk = d.date_sk\nGROUP BY d.year_month\nORDER BY d.year_month"
         }
       ],
       "fieldConfig": {
@@ -298,7 +298,7 @@
       "title": "Revenue by state (top 10)",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 0,
@@ -311,10 +311,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT c.customer_state AS state, ROUND(SUM(f.total_item_value), 2) AS revenue\nFROM delta.gold.fact_orders f\nJOIN delta.gold.dim_customer c ON f.customer_sk = c.customer_sk\nGROUP BY c.customer_state\nORDER BY revenue DESC\nLIMIT 10"
+          "rawSQL": "SELECT c.customer_state AS state, ROUND(SUM(f.total_item_value), 2) AS revenue\nFROM lakehouse.gold.fact_orders f\nJOIN lakehouse.gold.dim_customer c ON f.customer_sk = c.customer_sk\nGROUP BY c.customer_state\nORDER BY revenue DESC\nLIMIT 10"
         }
       ],
       "fieldConfig": {
@@ -344,7 +344,7 @@
       "title": "Top categories by sales",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 12,
@@ -357,10 +357,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT p.product_category_name_english AS category, ROUND(SUM(f.unit_price), 2) AS total_sales\nFROM delta.gold.fact_orders f\nJOIN delta.gold.dim_product p ON f.product_sk = p.product_sk\nGROUP BY p.product_category_name_english\nORDER BY total_sales DESC\nLIMIT 10"
+          "rawSQL": "SELECT p.product_category_name_english AS category, ROUND(SUM(f.unit_price), 2) AS total_sales\nFROM lakehouse.gold.fact_orders f\nJOIN lakehouse.gold.dim_product p ON f.product_sk = p.product_sk\nGROUP BY p.product_category_name_english\nORDER BY total_sales DESC\nLIMIT 10"
         }
       ],
       "fieldConfig": {
@@ -390,7 +390,7 @@
       "title": "Reviews by category (top 10)",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 0,
@@ -403,10 +403,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT p.product_category_name_english AS category,\n    COUNT(*) AS total_reviews,\n    ROUND(AVG(r.review_score), 2) AS avg_score,\n    ROUND(SUM(r.is_positive) * 100.0 / COUNT(*), 2) AS positive_rate_pct\nFROM delta.gold.fact_reviews r\nJOIN delta.gold.fact_orders f ON r.order_id = f.order_id\nJOIN delta.gold.dim_product p ON f.product_sk = p.product_sk\nGROUP BY p.product_category_name_english\nORDER BY total_reviews DESC\nLIMIT 10"
+          "rawSQL": "SELECT p.product_category_name_english AS category,\n    COUNT(*) AS total_reviews,\n    ROUND(AVG(r.review_score), 2) AS avg_score,\n    ROUND(SUM(r.is_positive) * 100.0 / COUNT(*), 2) AS positive_rate_pct\nFROM lakehouse.gold.fact_reviews r\nJOIN lakehouse.gold.fact_orders f ON r.order_id = f.order_id\nJOIN lakehouse.gold.dim_product p ON f.product_sk = p.product_sk\nGROUP BY p.product_category_name_english\nORDER BY total_reviews DESC\nLIMIT 10"
         }
       ],
       "fieldConfig": {
@@ -437,7 +437,7 @@
       "title": "Sessions",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 0,
@@ -450,10 +450,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT COUNT(DISTINCT session_sk) AS sessions FROM delta.gold.fact_sessions"
+          "rawSQL": "SELECT COUNT(DISTINCT session_sk) AS sessions FROM lakehouse.gold.fact_sessions"
         }
       ],
       "fieldConfig": {
@@ -479,7 +479,7 @@
       "title": "Events",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 6,
@@ -492,10 +492,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT COUNT(*) AS events FROM delta.gold.fact_clickstream_events"
+          "rawSQL": "SELECT COUNT(*) AS events FROM lakehouse.gold.fact_clickstream_events"
         }
       ],
       "fieldConfig": {
@@ -521,7 +521,7 @@
       "title": "Orders",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 12,
@@ -534,10 +534,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT COUNT(DISTINCT order_id) AS orders FROM delta.gold.fact_click_orders"
+          "rawSQL": "SELECT COUNT(DISTINCT order_id) AS orders FROM lakehouse.gold.fact_click_orders"
         }
       ],
       "fieldConfig": {
@@ -563,7 +563,7 @@
       "title": "Revenue (USD)",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 18,
@@ -576,10 +576,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT ROUND(SUM(total_usd), 2) AS revenue FROM delta.gold.fact_click_orders"
+          "rawSQL": "SELECT ROUND(SUM(total_usd), 2) AS revenue FROM lakehouse.gold.fact_click_orders"
         }
       ],
       "fieldConfig": {
@@ -608,7 +608,7 @@
       "title": "Conversion funnel (sessions per event type)",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 0,
@@ -621,10 +621,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT event_type, COUNT(DISTINCT session_sk) AS unique_sessions\nFROM delta.gold.fact_clickstream_events\nGROUP BY event_type\nORDER BY unique_sessions DESC"
+          "rawSQL": "SELECT event_type, COUNT(DISTINCT session_sk) AS unique_sessions\nFROM lakehouse.gold.fact_clickstream_events\nGROUP BY event_type\nORDER BY unique_sessions DESC"
         }
       ],
       "fieldConfig": {
@@ -653,7 +653,7 @@
       "title": "Revenue by device (USD)",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 12,
@@ -666,10 +666,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT d.device, ROUND(SUM(o.total_usd), 2) AS revenue_usd\nFROM delta.gold.fact_click_orders o\nJOIN delta.gold.dim_device d ON o.device_sk = d.device_sk\nGROUP BY d.device\nORDER BY revenue_usd DESC"
+          "rawSQL": "SELECT d.device, ROUND(SUM(o.total_usd), 2) AS revenue_usd\nFROM lakehouse.gold.fact_click_orders o\nJOIN lakehouse.gold.dim_device d ON o.device_sk = d.device_sk\nGROUP BY d.device\nORDER BY revenue_usd DESC"
         }
       ],
       "fieldConfig": {
@@ -699,7 +699,7 @@
       "title": "Revenue by country (top 10, USD)",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 0,
@@ -712,10 +712,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT c.country, ROUND(SUM(o.total_usd), 2) AS revenue_usd\nFROM delta.gold.fact_click_orders o\nJOIN delta.gold.dim_click_customer c ON o.customer_sk = c.customer_sk\nGROUP BY c.country\nORDER BY revenue_usd DESC\nLIMIT 10"
+          "rawSQL": "SELECT c.country, ROUND(SUM(o.total_usd), 2) AS revenue_usd\nFROM lakehouse.gold.fact_click_orders o\nJOIN lakehouse.gold.dim_click_customer c ON o.customer_sk = c.customer_sk\nGROUP BY c.country\nORDER BY revenue_usd DESC\nLIMIT 10"
         }
       ],
       "fieldConfig": {
@@ -745,7 +745,7 @@
       "title": "Sessions by device & traffic source",
       "datasource": {
         "type": "trino-datasource",
-        "uid": "trino-delta"
+        "uid": "trino-lakehouse"
       },
       "gridPos": {
         "x": 12,
@@ -758,10 +758,10 @@
           "refId": "A",
           "datasource": {
             "type": "trino-datasource",
-            "uid": "trino-delta"
+            "uid": "trino-lakehouse"
           },
           "format": 1,
-          "rawSQL": "SELECT d.device, ts.traffic_source,\n    COUNT(DISTINCT s.session_sk) AS total_sessions,\n    COUNT(e.event_sk) AS total_events,\n    ROUND(CAST(COUNT(e.event_sk) AS DOUBLE) / COUNT(DISTINCT s.session_sk), 2) AS avg_actions_per_session\nFROM delta.gold.fact_sessions s\nJOIN delta.gold.dim_device d ON s.device_sk = d.device_sk\nJOIN delta.gold.dim_traffic_source ts ON s.source_sk = ts.source_sk\nLEFT JOIN delta.gold.fact_clickstream_events e ON s.session_sk = e.session_sk\nGROUP BY d.device, ts.traffic_source\nORDER BY total_sessions DESC\nLIMIT 10"
+          "rawSQL": "SELECT d.device, ts.traffic_source,\n    COUNT(DISTINCT s.session_sk) AS total_sessions,\n    COUNT(e.event_sk) AS total_events,\n    ROUND(CAST(COUNT(e.event_sk) AS DOUBLE) / COUNT(DISTINCT s.session_sk), 2) AS avg_actions_per_session\nFROM lakehouse.gold.fact_sessions s\nJOIN lakehouse.gold.dim_device d ON s.device_sk = d.device_sk\nJOIN lakehouse.gold.dim_traffic_source ts ON s.source_sk = ts.source_sk\nLEFT JOIN lakehouse.gold.fact_clickstream_events e ON s.session_sk = e.session_sk\nGROUP BY d.device, ts.traffic_source\nORDER BY total_sessions DESC\nLIMIT 10"
         }
       ],
       "fieldConfig": {

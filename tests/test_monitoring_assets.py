@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from common.tables import MONITORING_SCHEMA, MONITORING_TABLES
+from common.tables import MONITORING_TABLES
 
 GRAFANA = Path(__file__).resolve().parents[1] / "grafana"
 DASHBOARD = GRAFANA / "dashboards" / "pipeline-monitoring.json"
@@ -37,13 +37,14 @@ def test_dashboard_panels_have_unique_ids_and_known_datasource():
 
 
 def test_queries_only_read_registered_monitoring_tables():
-    allowed = {f"delta.{MONITORING_SCHEMA}.{t}" for t in MONITORING_TABLES}
+    allowed = set(MONITORING_TABLES.values())  # lakehouse.monitoring.<table>, the Trino catalog too
     queries = _dashboard_queries() + [
         t["model"]["rawSQL"] for r in _alert_rules() for t in r["data"] if "rawSQL" in t["model"]
     ]
     assert queries
     for sql in queries:
-        assert set(re.findall(r"delta\.\w+\.\w+", sql)) <= allowed, sql
+        assert set(re.findall(r"lakehouse\.\w+\.\w+", sql)) <= allowed, sql
+        assert "delta." not in sql, sql
 
 
 def test_alert_rules_are_wired_to_the_contact_point():

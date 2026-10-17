@@ -16,7 +16,7 @@
 
 
 {% macro gold_properties() -%}
-    {#- Pin the table to <gold_location>/<model name>: the path common/tables.py registers in Unity
-        Catalog and the DQ / VACUUM jobs read. -#}
-    {{ return({"location": "'" ~ var("gold_location") ~ "/" ~ this.identifier ~ "'"}) }}
+    {#- Trino Iceberg table properties of every gold model. Polaris places the table under the
+        catalog's base location (s3://lakehouse/gold/...); spec v2 keeps it readable by every engine. -#}
+    {{ return({"format_version": "2"}) }}
 {%- endmacro %}

@@ -1,7 +1,7 @@
 """
 Shared defaults for SparkSubmitOperator tasks in this data-lakehouse.
 
-All Spark jobs need the same Delta / Kafka / S3 JARs and the same credentials
+All Spark jobs need the same Iceberg / Kafka / S3 JARs and the same credentials
 forwarded from Airflow env vars.  Keep
 everything here so the DAG file stays readable.
 """
@@ -12,14 +12,16 @@ import os
 import socket
 
 # ---------------------------------------------------------------------------
-# Spark packages required by every job
+# Spark packages required by every job (keep in sync with spark/Dockerfile + airflow/Dockerfile)
 # ---------------------------------------------------------------------------
+ICEBERG_VERSION = "1.11.0"
 SPARK_PACKAGES = ",".join(
     [
-        "io.delta:delta-spark_2.13:4.0.1",
+        f"org.apache.iceberg:iceberg-spark-runtime-4.0_2.13:{ICEBERG_VERSION}",
+        f"org.apache.iceberg:iceberg-aws-bundle:{ICEBERG_VERSION}",
         "org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.4",
+        # S3A: Iceberg's remove_orphan_files lists table locations through Hadoop FileSystem
         "org.apache.hadoop:hadoop-aws:3.4.1",
-        "io.unitycatalog:unitycatalog-spark_4.0_2.13:0.6.0",
     ]
 )
 
@@ -35,20 +37,15 @@ SILVER_JOBS = f"{JOBS_DIR}/silver"
 OPS_JOBS = f"{JOBS_DIR}/ops"
 
 # ---------------------------------------------------------------------------
-# Spark conf overrides applied to every submit
+# Spark conf overrides applied to every submit. The Iceberg catalog itself (`lakehouse` →
+# Polaris REST) is configured by common.config.create_spark_session from the env vars below.
 # ---------------------------------------------------------------------------
 SPARK_CONF = {
     "spark.driver.host": socket.gethostbyname(socket.gethostname()),
     "spark.driver.memory": os.environ.get("SPARK_DRIVER_MEMORY", "512m"),
     "spark.executor.memory": os.environ.get("SPARK_EXECUTOR_MEMORY", "1500m"),
     "spark.driver.maxResultSize": os.environ.get("SPARK_DRIVER_MAX_RESULT_SIZE", "256m"),
-    "spark.sql.extensions": "io.delta.sql.DeltaSparkSessionExtension",
-    "spark.sql.catalog.spark_catalog": "org.apache.spark.sql.delta.catalog.DeltaCatalog",
-    "spark.delta.logStore.class": "org.apache.spark.sql.delta.storage.S3SingleDriverLogStore",
-    "spark.hadoop.fs.s3a.path.style.access": "true",
-    "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
-    "spark.hadoop.fs.s3a.connection.ssl.enabled": "false",
-    "spark.hadoop.fs.s3.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
+    "spark.sql.extensions": "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
     "spark.sql.parquet.datetimeRebaseModeInWrite": "CORRECTED",
     "spark.sql.parquet.int96RebaseModeInWrite": "CORRECTED",
     "spark.sql.ansi.enabled": "false",
@@ -62,8 +59,10 @@ SPARK_ENV_VARS = {
     "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY", "password123"),
     "S3_ENDPOINT": os.environ.get("S3_ENDPOINT", "http://minio:9000"),
     "AWS_REGION": os.environ.get("AWS_REGION", "us-east-1"),
-    "UC_URI": os.environ.get("UC_URI", "http://unitycatalog:8080"),
-    "UC_CATALOG": os.environ.get("UC_CATALOG", "lakehouse"),
+    "POLARIS_URI": os.environ.get("POLARIS_URI", "http://polaris:8181/api/catalog"),
+    "POLARIS_CLIENT_ID": os.environ.get("POLARIS_CLIENT_ID", "root"),
+    "POLARIS_CLIENT_SECRET": os.environ.get("POLARIS_CLIENT_SECRET", "s3cr3t"),
+    "ICEBERG_CATALOG": os.environ.get("ICEBERG_CATALOG", "lakehouse"),
     "TRINO_HOST": os.environ.get("TRINO_HOST", "trino"),
     "TRINO_PORT": os.environ.get("TRINO_PORT", "8080"),
     "TRINO_USER": os.environ.get("TRINO_USER", "admin"),
@@ -112,13 +111,3 @@ def dq_kwargs(layer: str, **extra) -> dict:
         application_args=["--layer", layer],
         **extra,
     )
-
-
-def register_kwargs(layer: str, **extra) -> dict:
-    """SparkSubmitOperator kwargs that register every table of a layer in Unity Catalog + Trino."""
-    return common_kwargs(f"{layer.capitalize()}_RegisterTables", f"{JOBS_DIR}/{layer}/register_tables.py", **extra)
-
-
-def monitoring_kwargs(**extra) -> dict:
-    """SparkSubmitOperator kwargs that expose the pipeline metrics + DQ log tables to Trino / Grafana."""
-    return common_kwargs("Ops_RegisterMonitoring", f"{OPS_JOBS}/register_monitoring.py", **extra)

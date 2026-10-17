@@ -346,10 +346,18 @@ def validate_table(
             violations = df.filter(~coalesce(condition, lit(False))).count()
             pct = (violations / total * 100) if total > 0 else 0
             ok = pct <= 5.0
-        except Exception:
-            violations = -1
-            pct = 100.0
-            ok = False
+        except Exception as exc:
+            logger.exception("%s: rule %s could not be evaluated", table_name, rule_name)
+            passed = False
+            results.append(
+                {
+                    "table": table_name,
+                    "check": rule_name,
+                    "passed": False,
+                    "detail": f"ERROR evaluating rule: {type(exc).__name__}",
+                }
+            )
+            continue
         if not ok:
             passed = False
         results.append(

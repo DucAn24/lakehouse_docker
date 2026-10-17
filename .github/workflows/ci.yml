@@ -2,15 +2,16 @@ name: CI
 
 on:
   push:
-    branches: [dev]
+    branches: [dev, "claude/**"]
   pull_request:
   workflow_dispatch:
   # CD calls this workflow first, so master pushes are checked exactly once
   workflow_call:
 
+# Never cancel when called from CD: a cancelled CI run would silently skip publishing that commit.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'push' || github.ref != 'refs/heads/master' }}
 
 permissions:
   contents: read
@@ -137,4 +138,4 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: false
           cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,scope={0},mode=max', matrix.name) || '' }}

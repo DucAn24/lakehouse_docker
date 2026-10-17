@@ -48,6 +48,24 @@ def test_extract_cdc_latest_without_before_column_only_filters_deletes(spark):
     assert {r.id for r in extract_cdc_latest(df, key_cols=["id"]).collect()} == {"a"}
 
 
+def test_extract_cdc_latest_flat_frame_drops_keys_whose_newest_event_is_delete(spark):
+    # select_after=False: windows before filtering, and a ts tie goes to the delete
+    df = spark.createDataFrame(
+        [("c", 1, "a"), ("d", 2, "a"), ("u", 5, "b"), ("d", 5, "b"), ("c", 1, "c")], "op string, ts_ms long, id string"
+    )
+    out = extract_cdc_latest(df, key_cols=["id"], select_after=False)
+    assert {r.id for r in out.collect()} == {"c"}
+
+
+def test_extract_cdc_latest_payload_column_named_op_is_preserved(spark):
+    df = spark.createDataFrame(
+        [("c", 1, {"id": "a", "op": "payload"}, None)],
+        "op string, ts_ms long, after struct<id:string,op:string>, before struct<id:string,op:string>",
+    )
+    (row,) = extract_cdc_latest(df, key_cols=["id"]).collect()
+    assert (row.id, row.op) == ("a", "payload")
+
+
 def test_extract_cdc_latest_one_row_per_key(spark):
     df = _cdc(spark, [("c", 1, "a", "v1"), ("u", 2, "a", "v2"), ("u", 3, "a", "v3")])
     rows = extract_cdc_latest(df, key_cols=["id"]).collect()

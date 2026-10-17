@@ -1,5 +1,6 @@
 import re
 import trino
+from trino.exceptions import TrinoUserError
 from typing import Dict, Any
 from contextlib import contextmanager
 import os
@@ -14,6 +15,14 @@ _BLOCKED_KEYWORDS = re.compile(
 )
 _READ_QUERY_START = re.compile(r"^(SELECT|WITH)\b", re.IGNORECASE)
 _MAX_QUERY_LIMIT = 1000
+
+
+class QueryValidationError(ValueError):
+    """Trino rejected a query at analysis time (syntax, unknown table or column, type mismatch)."""
+
+    def __init__(self, message: str, error_name: str = ""):
+        super().__init__(message)
+        self.error_name = error_name
 
 
 def is_safe_query(sql: str) -> tuple[bool, str]:
@@ -48,7 +57,7 @@ def get_trino_config():
         "host": os.getenv("TRINO_HOST", "localhost"),
         "port": int(os.getenv("TRINO_PORT", "8080")),
         "user": os.getenv("TRINO_USER", "admin"),
-        "catalog": os.getenv("TRINO_CATALOG", "delta"),
+        "catalog": os.getenv("TRINO_CATALOG", "lakehouse"),
         "schema": os.getenv("TRINO_SCHEMA", "gold"),
         "http_scheme": os.getenv("TRINO_HTTP_SCHEME", "http"),
         "auth": None,
@@ -105,11 +114,22 @@ def execute_query(query: str) -> Dict[str, Any]:
             cursor.close()
 
 
-def execute_raw_query(sql: str, limit: int = 50) -> Dict[str, Any]:
+def validate_query(sql: str) -> None:
+    """Analyse a query in Trino without running it (EXPLAIN TYPE VALIDATE).
+
+    Raises QueryValidationError with Trino's message, so the caller can fix the query cheaply.
+    """
+    try:
+        execute_query(f"EXPLAIN (TYPE VALIDATE) {sql}")
+    except TrinoUserError as e:
+        raise QueryValidationError(e.message, e.error_name) from e
+
+
+def execute_raw_query(sql: str, limit: int = 50, validate: bool = True) -> Dict[str, Any]:
     """Run a chatbot-generated SELECT query with safety checks.
 
-    Raises ValueError if the query contains blocked operations.
-    Injects LIMIT automatically if not present.
+    Raises ValueError if the query contains blocked operations, QueryValidationError (a ValueError)
+    if Trino can't analyse it. Injects LIMIT automatically if not present.
     """
     safe, reason = is_safe_query(sql)
     if not safe:
@@ -122,4 +142,6 @@ def execute_raw_query(sql: str, limit: int = 50) -> Dict[str, Any]:
     if "LIMIT" not in sql.upper():
         sql += f" LIMIT {limit}"
 
+    if validate:
+        validate_query(sql)
     return execute_query(sql)

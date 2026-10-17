@@ -1,0 +1,79 @@
+version: 2
+
+# Every dimension except dim_date carries an UNKNOWN member with key -1; facts fall back to it
+# when a lookup does not resolve.
+models:
+  - name: dim_date
+    description: Calendar days over whole years covering every fact date.
+    columns:
+      - name: date_sk
+        description: yyyyMMdd
+        data_tests: [unique, not_null]
+      - name: full_date
+        data_tests: [unique, not_null]
+
+  - name: dim_customer
+    description: Olist customers, one row per person (customer_unique_id).
+    columns:
+      - name: customer_sk
+        data_tests: [unique, not_null]
+      - name: customer_unique_id
+        data_tests: [unique, not_null]
+
+  - name: dim_seller
+    description: Olist sellers with region and geolocation.
+    columns:
+      - name: seller_sk
+        data_tests: [unique, not_null]
+      - name: seller_id
+        data_tests: [unique, not_null]
+
+  - name: dim_product
+    description: Olist products with English category and size / weight bands.
+    columns:
+      - name: product_sk
+        data_tests: [unique, not_null]
+      - name: product_id
+        data_tests: [unique, not_null]
+      - name: size_category
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [SMALL, MEDIUM, LARGE, EXTRA_LARGE, UNKNOWN]
+      - name: weight_category
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [LIGHT, MEDIUM, HEAVY, VERY_HEAVY, UNKNOWN]
+
+  - name: dim_device
+    description: Devices seen in clickstream sessions and orders.
+    columns:
+      - name: device_sk
+        data_tests: [unique, not_null]
+      - name: device
+        data_tests: [unique, not_null]
+
+  - name: dim_traffic_source
+    description: Traffic sources seen in clickstream sessions and orders.
+    columns:
+      - name: source_sk
+        data_tests: [unique, not_null]
+      - name: traffic_source
+        data_tests: [unique, not_null]
+
+  - name: dim_click_customer
+    description: Clickstream customers.
+    columns:
+      - name: customer_sk
+        data_tests: [unique, not_null]
+      - name: customer_id
+        data_tests: [unique, not_null]
+
+  - name: dim_click_product
+    description: Clickstream products with price, cost and margin.
+    columns:
+      - name: product_sk
+        data_tests: [unique, not_null]
+      - name: product_id
+        data_tests: [unique, not_null]

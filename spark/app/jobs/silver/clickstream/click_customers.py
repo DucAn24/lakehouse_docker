@@ -16,14 +16,15 @@ from pyspark.sql.functions import (
 )
 from pyspark.sql.types import BooleanType, IntegerType
 
-from common.config import create_spark_session, get_logger, BRONZE_BUCKET, SILVER_BUCKET
+from common.config import create_spark_session, get_logger
 from common.transforms import extract_cdc_latest
-from common.writers import write_with_metrics
+from common.tables import SILVER_KEYS, table_id
+from common.writers import upsert_with_metrics
 
 logger = get_logger("b2s.click_customers")
 
-BRONZE_PATH = f"{BRONZE_BUCKET}/clickstream.public.click_customers/"
-SILVER_PATH = f"{SILVER_BUCKET}/click_customers/"
+BRONZE_TABLE = table_id("bronze", "click_customers")
+SILVER_TABLE = table_id("silver", "click_customers")
 
 
 def parse_signup_date(column):
@@ -51,7 +52,7 @@ def parse_signup_date(column):
 
 
 def run(spark):
-    df = spark.read.format("delta").load(BRONZE_PATH)
+    df = spark.table(BRONZE_TABLE)
     df_dedup = extract_cdc_latest(df, key_cols=["customer_id"])
 
     df_silver = df_dedup.select(
@@ -65,11 +66,11 @@ def run(spark):
         current_timestamp().alias("processed_at"),
     ).filter(col("customer_id").isNotNull())
 
-    write_with_metrics(df_silver, spark, "silver", "click_customers", SILVER_PATH)
+    upsert_with_metrics(df_silver, spark, "silver", "click_customers", SILVER_TABLE, SILVER_KEYS["click_customers"])
 
 
 if __name__ == "__main__":
-    spark = create_spark_session("B2S_ClickCustomers", f"{SILVER_BUCKET}/")
+    spark = create_spark_session("B2S_ClickCustomers")
     try:
         run(spark)
     except Exception:

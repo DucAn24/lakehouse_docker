@@ -18,7 +18,7 @@ logger = get_logger("data_quality")
 
 def main(layer: str, table: str | None = None):
     # Session first: the rule definitions use pyspark `col()`, which needs an active SparkContext.
-    spark = create_spark_session(f"DQ_{layer.capitalize()}" + (f"_{table}" if table else ""), f"s3a://{layer}/")
+    spark = create_spark_session(f"DQ_{layer.capitalize()}" + (f"_{table}" if table else ""))
     try:
         all_checks = CHECKS[layer]()
         if table and table not in all_checks:

@@ -29,7 +29,10 @@ RUN chmod -R 755 /opt/spark/app
 WORKDIR /opt/spark/work-dir
 USER spark
 
-# Pre-download and cache Spark Maven packages during build time to avoid runtime network download failures
-RUN spark-submit \
-    --packages io.delta:delta-spark_2.13:4.0.1,org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.4,org.apache.hadoop:hadoop-aws:3.4.1,io.unitycatalog:unitycatalog-spark_4.0_2.13:0.6.0 \
-    --version
+# Pre-download and cache Spark Maven packages during build time to avoid runtime network download failures.
+# `--version` exits before resolving, so run a no-op script. Keep in sync with airflow/dags/spark_submit_defaults.py.
+RUN echo pass > /tmp/noop.py && \
+    spark-submit --master local[1] \
+    --packages org.apache.iceberg:iceberg-spark-runtime-4.0_2.13:1.11.0,org.apache.iceberg:iceberg-aws-bundle:1.11.0,org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.4,org.apache.hadoop:hadoop-aws:3.4.1 \
+    /tmp/noop.py && \
+    rm /tmp/noop.py

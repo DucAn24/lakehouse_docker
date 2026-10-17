@@ -1,7 +1,7 @@
 """Reusable data quality framework for Bronze, Silver and Gold layers.
 
-Validates Delta tables against configurable rules and writes results to a
-quality log Delta table at QUALITY_LOG_PATH.  Returns exit-code-friendly
+Validates Iceberg tables against configurable rules and writes results to the
+quality log table (common.tables.QUALITY_LOG_TABLE).  Returns exit-code-friendly
 pass/fail so Airflow can gate downstream steps.
 """
 
@@ -12,8 +12,9 @@ from datetime import datetime, timezone
 from pyspark.sql import SparkSession, Row
 from pyspark.sql.functions import coalesce, col, lit
 
-from common.config import QUALITY_LOG_PATH, get_logger
-from common.tables import table_path
+from common.catalog import append_rows
+from common.config import get_logger
+from common.tables import QUALITY_LOG_TABLE, table_id
 
 logger = get_logger("data_quality")
 
@@ -51,7 +52,7 @@ def get_bronze_checks() -> dict[str, dict]:
     checks = {}
     for table, keys in BRONZE_KEYS.items():
         checks[table] = {
-            "path": table_path("bronze", table),
+            "table": table_id("bronze", table),
             "primary_keys": [f"after.{k}" for k in keys],
             "row_filter": col("op") != "d",
             "check_duplicates": False,
@@ -67,7 +68,7 @@ def get_bronze_checks() -> dict[str, dict]:
 def get_silver_checks() -> dict[str, dict]:
     return {
         "olist_customers": {
-            "path": table_path("silver", "olist_customers"),
+            "table": table_id("silver", "olist_customers"),
             "primary_keys": ["customer_id"],
             "rules": {
                 "Valid State Code": col("customer_state").rlike("^[A-Z]{2}$"),
@@ -77,7 +78,7 @@ def get_silver_checks() -> dict[str, dict]:
             },
         },
         "olist_sellers": {
-            "path": table_path("silver", "olist_sellers"),
+            "table": table_id("silver", "olist_sellers"),
             "primary_keys": ["seller_id"],
             "rules": {
                 "Valid State Code": col("seller_state").rlike("^[A-Z]{2}$"),
@@ -86,7 +87,7 @@ def get_silver_checks() -> dict[str, dict]:
             },
         },
         "olist_products": {
-            "path": table_path("silver", "olist_products"),
+            "table": table_id("silver", "olist_products"),
             "primary_keys": ["product_id"],
             "rules": {
                 "Positive Weight": (col("product_weight_g").isNull()) | (col("product_weight_g") > 0),
@@ -94,7 +95,7 @@ def get_silver_checks() -> dict[str, dict]:
             },
         },
         "olist_orders": {
-            "path": table_path("silver", "olist_orders"),
+            "table": table_id("silver", "olist_orders"),
             "primary_keys": ["order_id"],
             "rules": {
                 "Valid Status": col("order_status").isin(
@@ -107,7 +108,7 @@ def get_silver_checks() -> dict[str, dict]:
             },
         },
         "olist_order_items": {
-            "path": table_path("silver", "olist_order_items"),
+            "table": table_id("silver", "olist_order_items"),
             "primary_keys": ["order_id", "order_item_id"],
             "rules": {
                 "Positive Price": col("price") >= 0,
@@ -116,7 +117,7 @@ def get_silver_checks() -> dict[str, dict]:
             },
         },
         "olist_order_payments": {
-            "path": table_path("silver", "olist_order_payments"),
+            "table": table_id("silver", "olist_order_payments"),
             "primary_keys": ["order_id", "payment_sequential"],
             "rules": {
                 "Valid Payment Type": col("payment_type").isin(["CREDIT_CARD", "BOLETO", "VOUCHER", "DEBIT_CARD"]),
@@ -125,7 +126,7 @@ def get_silver_checks() -> dict[str, dict]:
             },
         },
         "olist_order_reviews": {
-            "path": table_path("silver", "olist_order_reviews"),
+            "table": table_id("silver", "olist_order_reviews"),
             "primary_keys": ["review_id", "order_id"],
             "rules": {
                 "Valid Score": col("review_score").between(1, 5),
@@ -134,7 +135,7 @@ def get_silver_checks() -> dict[str, dict]:
         },
         # Clickstream
         "click_customers": {
-            "path": table_path("silver", "click_customers"),
+            "table": table_id("silver", "click_customers"),
             "primary_keys": ["customer_id"],
             "rules": {
                 "Valid Email": col("email").contains("@"),
@@ -142,7 +143,7 @@ def get_silver_checks() -> dict[str, dict]:
             },
         },
         "click_products": {
-            "path": table_path("silver", "click_products"),
+            "table": table_id("silver", "click_products"),
             "primary_keys": ["product_id"],
             "rules": {
                 "Non-negative Price": col("price_usd") >= 0,
@@ -150,7 +151,7 @@ def get_silver_checks() -> dict[str, dict]:
             },
         },
         "click_sessions": {
-            "path": table_path("silver", "click_sessions"),
+            "table": table_id("silver", "click_sessions"),
             "primary_keys": ["session_id"],
             "rules": {
                 "Has Start Time": col("start_time").isNotNull(),
@@ -159,7 +160,7 @@ def get_silver_checks() -> dict[str, dict]:
             },
         },
         "click_orders": {
-            "path": table_path("silver", "click_orders"),
+            "table": table_id("silver", "click_orders"),
             "primary_keys": ["order_id"],
             "rules": {
                 "Has Order Time": col("order_time").isNotNull(),
@@ -168,7 +169,7 @@ def get_silver_checks() -> dict[str, dict]:
             },
         },
         "click_order_items": {
-            "path": table_path("silver", "click_order_items"),
+            "table": table_id("silver", "click_order_items"),
             "primary_keys": ["order_id", "product_id"],
             "rules": {
                 "Positive Quantity": col("quantity") >= 1,
@@ -176,7 +177,7 @@ def get_silver_checks() -> dict[str, dict]:
             },
         },
         "click_events": {
-            "path": table_path("silver", "click_events"),
+            "table": table_id("silver", "click_events"),
             "primary_keys": ["event_id"],
             "rules": {
                 "Has Event Type": col("event_type").isNotNull(),
@@ -184,7 +185,7 @@ def get_silver_checks() -> dict[str, dict]:
             },
         },
         "click_reviews": {
-            "path": table_path("silver", "click_reviews"),
+            "table": table_id("silver", "click_reviews"),
             "primary_keys": ["review_id"],
             "rules": {
                 "Valid Rating": col("rating").between(1, 5),
@@ -201,12 +202,12 @@ def get_gold_checks() -> dict[str, dict]:
         return coalesce(col(column), lit(-1)) != -1
 
     return {
-        "dim_customer": {"path": table_path("gold", "dim_customer"), "primary_keys": ["customer_sk"], "rules": {}},
-        "dim_date": {"path": table_path("gold", "dim_date"), "primary_keys": ["date_sk"], "rules": {}},
-        "dim_seller": {"path": table_path("gold", "dim_seller"), "primary_keys": ["seller_sk"], "rules": {}},
-        "dim_product": {"path": table_path("gold", "dim_product"), "primary_keys": ["product_sk"], "rules": {}},
+        "dim_customer": {"table": table_id("gold", "dim_customer"), "primary_keys": ["customer_sk"], "rules": {}},
+        "dim_date": {"table": table_id("gold", "dim_date"), "primary_keys": ["date_sk"], "rules": {}},
+        "dim_seller": {"table": table_id("gold", "dim_seller"), "primary_keys": ["seller_sk"], "rules": {}},
+        "dim_product": {"table": table_id("gold", "dim_product"), "primary_keys": ["product_sk"], "rules": {}},
         "fact_orders": {
-            "path": table_path("gold", "fact_orders"),
+            "table": table_id("gold", "fact_orders"),
             "primary_keys": ["order_item_sk"],
             "rules": {
                 "Resolved customer FK": resolved("customer_sk"),
@@ -216,7 +217,7 @@ def get_gold_checks() -> dict[str, dict]:
             },
         },
         "fact_reviews": {
-            "path": table_path("gold", "fact_reviews"),
+            "table": table_id("gold", "fact_reviews"),
             "primary_keys": ["review_sk"],
             "rules": {
                 "Resolved customer FK": resolved("customer_sk"),
@@ -225,12 +226,12 @@ def get_gold_checks() -> dict[str, dict]:
             },
         },
         # Clickstream
-        "dim_device": {"path": table_path("gold", "dim_device"), "primary_keys": ["device_sk"], "rules": {}},
-        "dim_traffic_source": {"path": table_path("gold", "dim_traffic_source"), "primary_keys": ["source_sk"], "rules": {}},
-        "dim_click_customer": {"path": table_path("gold", "dim_click_customer"), "primary_keys": ["customer_sk"], "rules": {}},
-        "dim_click_product": {"path": table_path("gold", "dim_click_product"), "primary_keys": ["product_sk"], "rules": {}},
+        "dim_device": {"table": table_id("gold", "dim_device"), "primary_keys": ["device_sk"], "rules": {}},
+        "dim_traffic_source": {"table": table_id("gold", "dim_traffic_source"), "primary_keys": ["source_sk"], "rules": {}},
+        "dim_click_customer": {"table": table_id("gold", "dim_click_customer"), "primary_keys": ["customer_sk"], "rules": {}},
+        "dim_click_product": {"table": table_id("gold", "dim_click_product"), "primary_keys": ["product_sk"], "rules": {}},
         "fact_click_orders": {
-            "path": table_path("gold", "fact_click_orders"),
+            "table": table_id("gold", "fact_click_orders"),
             "primary_keys": ["order_sk"],
             "rules": {
                 "Resolved customer FK": resolved("customer_sk"),
@@ -241,7 +242,7 @@ def get_gold_checks() -> dict[str, dict]:
             },
         },
         "fact_sessions": {
-            "path": table_path("gold", "fact_sessions"),
+            "table": table_id("gold", "fact_sessions"),
             "primary_keys": ["session_sk"],
             "rules": {
                 "Resolved customer FK": resolved("customer_sk"),
@@ -251,7 +252,7 @@ def get_gold_checks() -> dict[str, dict]:
             },
         },
         "fact_clickstream_events": {
-            "path": table_path("gold", "fact_clickstream_events"),
+            "table": table_id("gold", "fact_clickstream_events"),
             "primary_keys": ["event_sk"],
             "rules": {
                 "Resolved session FK": resolved("session_sk"),
@@ -259,7 +260,7 @@ def get_gold_checks() -> dict[str, dict]:
             },
         },
         "fact_click_reviews": {
-            "path": table_path("gold", "fact_click_reviews"),
+            "table": table_id("gold", "fact_click_reviews"),
             "primary_keys": ["review_sk"],
             "rules": {
                 "Resolved order FK": resolved("order_sk"),
@@ -276,13 +277,13 @@ def get_gold_checks() -> dict[str, dict]:
 def validate_table(
     spark: SparkSession,
     table_name: str,
-    path: str,
+    table: str,
     primary_keys: list[str],
     rules: dict | None = None,
     row_filter=None,
     check_duplicates: bool = True,
 ) -> tuple[bool, list[dict]]:
-    """Validate a Delta table and return (passed, list_of_results).
+    """Validate an Iceberg table and return (passed, list_of_results).
 
     A table *fails* if:
       - It has 0 records
@@ -296,9 +297,9 @@ def validate_table(
     passed = True
 
     try:
-        df = spark.read.format("delta").load(path)
+        df = spark.table(table)
     except Exception as exc:
-        logger.error("Cannot read %s at %s: %s", table_name, path, exc)
+        logger.error("Cannot read %s (%s): %s", table_name, table, exc)
         return False, [{"table": table_name, "check": "readable", "passed": False, "detail": str(exc)}]
 
     if row_filter is not None:
@@ -393,7 +394,7 @@ def run_quality_checks(
         ok, results = validate_table(
             spark,
             table_name,
-            path=cfg["path"],
+            table=cfg["table"],
             primary_keys=cfg["primary_keys"],
             rules=cfg.get("rules", {}),
             row_filter=cfg.get("row_filter"),
@@ -403,7 +404,7 @@ def run_quality_checks(
             all_passed = False
         all_results.extend(results)
 
-    # Persist results to quality log Delta table
+    # Persist results to the quality log table
     _write_quality_log(spark, layer, all_results)
 
     summary = "PASSED" if all_passed else "FAILED"
@@ -412,7 +413,7 @@ def run_quality_checks(
 
 
 def _write_quality_log(spark: SparkSession, layer: str, results: list[dict]):
-    """Append quality check results to the quality log Delta table."""
+    """Append quality check results to the quality log table."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     rows = [
         Row(
@@ -426,8 +427,7 @@ def _write_quality_log(spark: SparkSession, layer: str, results: list[dict]):
         for r in results
     ]
     try:
-        df = spark.createDataFrame(rows)
-        df.write.format("delta").mode("append").save(QUALITY_LOG_PATH)
+        append_rows(spark.createDataFrame(rows), QUALITY_LOG_TABLE)
     except Exception:
         logger.warning("Failed to write quality log — continuing", exc_info=True)
 

@@ -1,18 +1,24 @@
+import json
 import logging
 import os
+import re
+import time
 import traceback
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Tuple
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langgraph.prebuilt import create_react_agent
 
 from config import get_available_sql_files
-from core.sql_query import execute_sql_with_filters
-from core.database import execute_query, execute_raw_query
+from core.charts import to_ui_result
+from core.sql_query import execute_sql_with_filters, load_sql_file
+from core.database import QueryValidationError, execute_query, execute_raw_query
+from core.schema_context import schema_context
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,66 +37,141 @@ logger.info(f"MIMO_API_KEY loaded: {'Yes' if MIMO_API_KEY else 'No'}")
 # ---------------------------------------------------------------------------
 
 
+_SQL_BLOCK = re.compile(r"```sql.*?```", re.IGNORECASE | re.DOTALL)
+MAX_QUERY_FAILURES = 3
+MAX_ROWS_TO_MODEL = 100
+
+# Per-request counter of failed queries, so a model stuck on a bad query stops instead of hitting the
+# recursion limit. A mutable dict: tool threads share it even when they get a copy of the context.
+_query_failures: ContextVar[Optional[Dict[str, int]]] = ContextVar("query_failures", default=None)
+
+
+def _to_model(payload: Dict[str, Any]) -> str:
+    return json.dumps(payload, default=str, ensure_ascii=False)
+
+
+def _failure(payload: Dict[str, Any]) -> Tuple[str, None]:
+    """Error result for the model; after repeated failures it is told to give up."""
+    counter = _query_failures.get()
+    if counter is not None:
+        counter["n"] += 1
+        if counter["n"] >= MAX_QUERY_FAILURES:
+            payload["stop"] = (
+                "Too many failed queries. Do not run another query: tell the user politely that you "
+                "couldn't answer this and suggest a simpler or rephrased question."
+            )
+    return _to_model(payload), None
+
+
+def _success(
+    sql: str, columns: List[str], data: List[Dict[str, Any]], elapsed_ms: int, chart_request=None, **extra
+) -> Tuple[str, dict]:
+    """Rows for the model (capped) and the full structured result for the UI (the tool artifact)."""
+    ui = to_ui_result(sql, columns, data, elapsed_ms, chart_request)
+    payload = {
+        "query_executed": sql,
+        "count": len(data),
+        "columns": columns,
+        "data": data[:MAX_ROWS_TO_MODEL],
+        "chart_drawn": ui["chart"]["type"] if ui["chart"] else None,
+        **extra,
+    }
+    if len(data) > MAX_ROWS_TO_MODEL:
+        payload["note"] = (
+            f"Only the first {MAX_ROWS_TO_MODEL} of {len(data)} rows are shown to you; "
+            "the user sees the full result in the UI."
+        )
+    return _to_model(payload), ui
+
+
 @tool
 def list_tables() -> Dict[str, Any]:
-    """List all tables available in the gold layer of the Data Lakehouse (delta.gold schema)."""
+    """List all tables available in the gold layer of the Data Lakehouse (lakehouse.gold schema)."""
     try:
-        result = execute_query("SHOW TABLES FROM delta.gold")
+        result = execute_query("SHOW TABLES FROM lakehouse.gold")
         tables = [row[list(row.keys())[0]] for row in result["data"]]
-        return {"tables": tables, "schema": "delta.gold"}
+        return {"tables": tables, "schema": "lakehouse.gold"}
     except Exception as e:
         return {"error": str(e)}
 
 
 @tool
 def describe_table(table_name: str) -> Dict[str, Any]:
-    """Get column names and data types for a table in delta.gold.
+    """Get column names and data types for a table in lakehouse.gold.
 
     Args:
         table_name: Table name without schema prefix, e.g. 'fact_orders' or 'dim_customer'
     """
     try:
-        result = execute_query(f"DESCRIBE delta.gold.{table_name}")
+        result = execute_query(f"DESCRIBE lakehouse.gold.{table_name}")
         columns = [
             {"column": row.get("Column", row.get("column", "")), "type": row.get("Type", row.get("type", ""))}
             for row in result["data"]
         ]
-        return {"table": f"delta.gold.{table_name}", "columns": columns}
+        return {"table": f"lakehouse.gold.{table_name}", "columns": columns}
     except Exception as e:
         return {"error": str(e)}
 
 
-@tool
-def run_select_query(sql: str, limit: int = 50) -> Dict[str, Any]:
+@tool(response_format="content_and_artifact")
+def run_select_query(
+    sql: str,
+    limit: int = 50,
+    chart_type: Optional[str] = None,
+    x: Optional[str] = None,
+    y: Optional[List[str]] = None,
+    series: Optional[str] = None,
+) -> Tuple[str, Optional[dict]]:
     """Execute a custom SELECT query against the Trino Data Lakehouse.
 
     Only SELECT statements are allowed. INSERT, UPDATE, DELETE, DROP, CREATE,
     ALTER, TRUNCATE, MERGE, REPLACE, GRANT, REVOKE are all blocked.
     A LIMIT clause will be added automatically if not present.
-    Always use fully-qualified table names: delta.gold.<table_name>.
+    The query is validated by Trino first: on a validation error you get Trino's message and the
+    columns of the tables you used, so fix the query and call this tool again.
+    Always use fully-qualified table names: lakehouse.gold.<table_name>.
+    The user sees the SQL, the rows and a chart in the UI automatically (a bar or line chart is
+    picked from the data). Pass chart_type only when the user asks for a specific chart, or when
+    another one clearly fits better; the columns must exist in your SELECT.
 
     Args:
         sql: A valid Trino SELECT query.
         limit: Max rows to return (default 50, max 1000).
+        chart_type: Optional. "bar", "stacked_bar", "line", "pie", or "table" (no chart).
+        x: Column for the x axis / pie labels (a category or a date).
+        y: Numeric column(s) to plot, e.g. ["revenue"]. Several columns = several series.
+        series: Optional column that splits one numeric y into series, e.g. x="month",
+            series="device", y=["revenue"]. Needs exactly one y.
     """
     try:
-        limit = min(limit, 1000)
-        result = execute_raw_query(sql, limit=limit)
-        return {
-            "query_executed": result["query_executed"],
-            "count": result["count"],
-            "columns": result["columns"],
-            "data": result["data"],
-        }
+        start = time.time()
+        result = execute_raw_query(sql, limit=min(limit, 1000))
+        return _success(
+            result["query_executed"],
+            result["columns"],
+            result["data"],
+            round((time.time() - start) * 1000),
+            chart_request={"chart_type": chart_type, "x": x, "y": y, "series": series},
+        )
+    except QueryValidationError as e:
+        logger.info("Query rejected by Trino (%s): %s", e.error_name, e)
+        return _failure(
+            {
+                "error": str(e),
+                "error_type": e.error_name,
+                "hint": "Fix the query and try again. These are the real columns of the tables you used.",
+                "tables": schema_context.tables_used_in(sql),
+            }
+        )
     except ValueError as e:
         # Safety guard triggered
-        return {"error": str(e), "blocked": True}
+        return _failure({"error": str(e), "blocked": True})
     except Exception as e:
-        return {"error": str(e)}
+        return _failure({"error": str(e)})
 
 
-@tool
-def get_data(api_name: str, limit: int = 50) -> Dict[str, Any]:
+@tool(response_format="content_and_artifact")
+def get_data(api_name: str, limit: int = 50) -> Tuple[str, Optional[dict]]:
     """Fetch data using a pre-built SQL template by name.
 
     Available templates:
@@ -98,6 +179,7 @@ def get_data(api_name: str, limit: int = 50) -> Dict[str, Any]:
                     top_products_by_category, review_analysis.
       Clickstream:  funnel_analysis, session_analytics,
                     device_performance, click_revenue_by_country.
+    The user sees the SQL, the rows and a chart in the UI automatically.
 
     Args:
         api_name: Template name (without .sql extension).
@@ -105,27 +187,25 @@ def get_data(api_name: str, limit: int = 50) -> Dict[str, Any]:
     """
     available = get_available_sql_files()
     if api_name not in available:
-        return {"error": f"Template '{api_name}' not found. Available: {available}"}
-
-    from core.sql_query import load_sql_file
+        return _failure({"error": f"Template '{api_name}' not found. Available: {available}"})
 
     try:
-        base_sql = load_sql_file(api_name)
-        if "LIMIT" not in base_sql.upper():
-            base_sql += f" LIMIT {limit}"
-        query_executed = base_sql
-    except Exception:
-        query_executed = f"SELECT * FROM delta.gold.{api_name} LIMIT {limit}"
-
-    data = execute_sql_with_filters(api_name, {}, limit)
-    return {"api": api_name, "query_executed": query_executed, "count": len(data), "data": data}
+        sql = load_sql_file(api_name)
+        if "LIMIT" not in sql.upper():
+            sql += f" LIMIT {limit}"
+        start = time.time()
+        data = execute_sql_with_filters(api_name, {}, limit)
+    except Exception as e:
+        return _failure({"error": getattr(e, "detail", str(e))})
+    columns = list(data[0].keys()) if data else []
+    return _success(sql, columns, data, round((time.time() - start) * 1000), api=api_name)
 
 
 # ---------------------------------------------------------------------------
 # System prompt — full star schema knowledge baked in
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are a friendly and professional Data Analyst assistant for a Data Lakehouse built on Apache Trino + Delta Lake.
+SYSTEM_PROMPT = """You are a friendly and professional Data Analyst assistant for a Data Lakehouse built on Apache Trino + Apache Iceberg.
 Your name is **LakeBot**. You specialize in answering questions about data, analytics, and business insights using the lakehouse.
 
 ════════════════════════════════════════════════════
@@ -176,123 +256,7 @@ If you cannot find the data or the question is too complex to answer:
 If a query returns empty results:
   • Say something like: "The query ran successfully, but returned no results for those filters. This might mean [possible reason]. Would you like to try with different criteria?"
 
-════════════════════════════════════════════════════
-GALAXY SCHEMA (Constellation) — delta.gold layer
-════════════════════════════════════════════════════
-Two star schemas sharing dim_date as a conformed dimension.
-
-┌─────────────────────────────────────────────────┐
-│  STAR 1 — Olist E-Commerce (Brazil)             │
-└─────────────────────────────────────────────────┘
-
-FACT TABLES
-───────────
-• fact_orders   — one row per order item
-    order_id, customer_sk, product_sk, date_sk,
-    total_item_value, freight_value, payment_value,
-    order_status, seller_sk
-
-• fact_reviews   — product reviews linked to orders
-    review_id, order_id, product_sk, date_sk,
-    review_score, review_comment_title, review_comment_message
-
-DIMENSION TABLES
-────────────────
-• dim_customer  — Olist customer master
-    customer_sk (PK), customer_id,
-    customer_city, customer_state, customer_region
-
-• dim_product   — Olist product master
-    product_sk (PK), product_id,
-    product_category_name, product_category_name_english,
-    product_weight_g, product_length_cm
-
-JOIN KEYS (Olist)
-─────────────────
-  fact_orders.customer_sk  → dim_customer.customer_sk
-  fact_orders.product_sk   → dim_product.product_sk
-  fact_orders.date_sk      → dim_date.date_sk
-  fact_reviews.product_sk  → dim_product.product_sk
-  fact_reviews.date_sk     → dim_date.date_sk
-
-┌─────────────────────────────────────────────────┐
-│  STAR 2 — Clickstream Analytics (Global)        │
-└─────────────────────────────────────────────────┘
-
-FACT TABLES
-───────────
-• fact_click_orders — one row per clickstream order
-    order_sk (PK), order_id,
-    customer_sk (FK→dim_click_customer), date_sk (FK→dim_date),
-    device_sk (FK→dim_device), source_sk (FK→dim_traffic_source),
-    payment_method, discount_pct, subtotal_usd, total_usd,
-    country, order_timestamp
-
-• fact_sessions — one row per user session
-    session_sk (PK), session_id,
-    customer_sk (FK→dim_click_customer), date_sk (FK→dim_date),
-    device_sk (FK→dim_device), source_sk (FK→dim_traffic_source),
-    country, session_start_timestamp
-
-• fact_clickstream_events — one row per user event (PAGE_VIEW, ADD_TO_CART, PURCHASE, …)
-    event_sk (PK), event_id,
-    session_sk (FK→fact_sessions), customer_sk (FK→dim_click_customer),
-    date_sk (FK→dim_date), product_sk (FK→dim_click_product),
-    event_type, quantity, payment_method, event_timestamp
-
-• fact_click_reviews — one row per product review
-    review_sk (PK), review_id,
-    order_sk (FK→fact_click_orders), product_sk (FK→dim_click_product),
-    date_sk (FK→dim_date),
-    rating (1-5), review_text, sentiment (POSITIVE/NEUTRAL/NEGATIVE),
-    review_timestamp
-
-DIMENSION TABLES
-────────────────
-• dim_click_customer — clickstream customer master
-    customer_sk (PK), customer_id,
-    customer_name, email, country, age,
-    signup_date, marketing_opt_in
-
-• dim_click_product — clickstream product master
-    product_sk (PK), product_id,
-    product_category, product_name,
-    price_usd, cost_usd, margin_usd
-
-• dim_device — device type dimension
-    device_sk (PK), device (MOBILE/DESKTOP/TABLET/…)
-
-• dim_traffic_source — traffic acquisition source
-    source_sk (PK), traffic_source (ORGANIC/PAID/EMAIL/…)
-
-JOIN KEYS (Clickstream)
-───────────────────────
-  fact_click_orders.customer_sk    → dim_click_customer.customer_sk
-  fact_click_orders.device_sk      → dim_device.device_sk
-  fact_click_orders.source_sk      → dim_traffic_source.source_sk
-  fact_click_orders.date_sk        → dim_date.date_sk
-  fact_sessions.customer_sk        → dim_click_customer.customer_sk
-  fact_sessions.device_sk          → dim_device.device_sk
-  fact_sessions.source_sk          → dim_traffic_source.source_sk
-  fact_sessions.date_sk            → dim_date.date_sk
-  fact_clickstream_events.session_sk  → fact_sessions.session_sk
-  fact_clickstream_events.customer_sk → dim_click_customer.customer_sk
-  fact_clickstream_events.product_sk  → dim_click_product.product_sk
-  fact_clickstream_events.date_sk     → dim_date.date_sk
-  fact_click_reviews.order_sk      → fact_click_orders.order_sk
-  fact_click_reviews.product_sk    → dim_click_product.product_sk
-  fact_click_reviews.date_sk       → dim_date.date_sk
-
-┌─────────────────────────────────────────────────┐
-│  SHARED / CONFORMED DIMENSION                   │
-└─────────────────────────────────────────────────┘
-• dim_date — calendar dimension (shared by both stars)
-    date_sk (PK), full_date, year, month, day,
-    quarter, day_of_week, week_of_year
-
-⚠ IMPORTANT: Olist and Clickstream use SEPARATE customer/product
-  dimensions. Do NOT join dim_customer with clickstream facts or
-  dim_click_customer with Olist facts.
+__SCHEMA__
 
 ════════════════════════════════════════════
 PRE-BUILT TEMPLATES (shortcuts)
@@ -318,29 +282,34 @@ RULES YOU MUST FOLLOW (CRITICAL & STRICT)
    DROP, CREATE, ALTER, TRUNCATE, MERGE, REPLACE, GRANT, or REVOKE.
    If the user asks for a write operation, politely refuse and explain why.
 
-2. Always use fully-qualified table names: delta.gold.<table_name>
+2. Always use fully-qualified table names: lakehouse.gold.<table_name>
 
 3. When unsure about columns, call describe_table first.
 
 4. Default LIMIT is 50. Apply LIMIT unless the user explicitly asks for all rows.
 
-5. MANDATORY QUERY INSPECTOR REQUIREMENT:
-   Whenever you run a query using `run_select_query` or load a pre-built template using `get_data`, you MUST include the exact executed SQL query in a ```sql markdown code block in your response.
-   Do NOT omit it! The frontend UI detects this ```sql block to render an interactive clickable accordion dropdown (query inspector).
-   Example format:
-   ---
-   ### SQL Query Executed
-   ```sql
-   SELECT ...
-   ```
-   ### Results
-   ...
-   ---
+5. The UI automatically shows the executed SQL, the full result table and a chart for every
+   `run_select_query` / `get_data` call. Do NOT paste the SQL or a table of the rows in your answer;
+   write a short summary and the insights instead (cite the key numbers).
+
+   Charts: a bar/line chart is picked automatically. When the user asks for a chart type
+   (pie, stacked, line, "plot", "chart", "trend by …"), pass `chart_type`, `x`, `y` (and `series`
+   for a breakdown) to `run_select_query`, and select the columns that chart needs: one
+   category/date column, one numeric column per series (or a third column for `series`).
+   Use "table" if the user only wants the table. The result's `chart_drawn` says what was drawn;
+   never draw ASCII charts.
+
+   If `run_select_query` returns an error, read it (and the table columns it includes), fix the
+   query and call it again. If the result says "stop", do not query any more.
 
 6. Provide brief, meaningful insights after returning the data.
 
 7. Language Preference: Always respond in the language the user asked in. If the user asks in Vietnamese ("năm có doanh thu cao nhất"), reply in Vietnamese! If the user asks in English, reply in English! Keep technical SQL code blocks in SQL.
 """
+
+
+def build_system_prompt() -> str:
+    return SYSTEM_PROMPT.replace("__SCHEMA__", schema_context.prompt_section())
 
 
 # ---------------------------------------------------------------------------
@@ -379,41 +348,52 @@ class DataChatbot:
             raise ValueError("Conversation ID is too long.")
         return conversation_id
 
-    def chat(self, user_message: str, conversation_id: str = "default") -> str:
+    def chat(self, user_message: str, conversation_id: str = "default") -> Tuple[str, List[dict]]:
+        """Answer a message; returns (text, structured results of the queries that were run)."""
+        token = _query_failures.set({"n": 0})
         try:
             conversation_key = self._conversation_key(conversation_id)
             logger.info(f"Received message: {user_message[:100]}...")
 
-            messages = [SystemMessage(content=SYSTEM_PROMPT)]
+            messages = [SystemMessage(content=build_system_prompt())]
             messages.extend(self.chat_histories.get(conversation_key, []))
             messages.append(HumanMessage(content=user_message))
 
             logger.info("Invoking agent...")
-            response = self.agent.invoke({"messages": messages}, {"recursion_limit": 15})
+            response = self.agent.invoke({"messages": messages}, {"recursion_limit": 25})
             logger.info("Agent response received")
+
+            # History holds plain text only, so every ToolMessage here belongs to this turn.
+            queries = [
+                m.artifact for m in response["messages"] if isinstance(m, ToolMessage) and isinstance(m.artifact, dict)
+            ]
 
             ai_messages = [m for m in response["messages"] if isinstance(m, AIMessage)]
             if ai_messages:
                 last_response = ai_messages[-1].content
+                if queries:  # the UI renders the SQL from `queries`
+                    last_response = _SQL_BLOCK.sub("", last_response).strip()
 
                 history = self.chat_histories.setdefault(conversation_key, [])
                 history.extend((HumanMessage(content=user_message), AIMessage(content=last_response)))
                 self.chat_histories[conversation_key] = history[-20:]
 
                 logger.info(f"Response: {str(last_response)[:100]}...")
-                return last_response
+                return last_response, queries
 
             logger.warning("No AI message in response")
             return (
                 "Hmm, I wasn't able to generate a response for that. "
                 "Could you try rephrasing your question? I'm here to help "
                 "with anything about our lakehouse data! 😊"
-            )
+            ), []
 
         except Exception as e:
             logger.error(f"Error in chat: {str(e)}")
             logger.error(traceback.format_exc())
-            return self._friendly_error(e)
+            return self._friendly_error(e), []
+        finally:
+            _query_failures.reset(token)
 
     @staticmethod
     def _friendly_error(e: Exception) -> str:

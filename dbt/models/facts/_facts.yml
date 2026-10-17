@@ -1,0 +1,157 @@
+version: 2
+
+# Foreign keys: `relationships` proves every key exists in its dimension, `unknown_member_ratio`
+# fails when more than 5 % of the rows fell back to the UNKNOWN (-1) member or have no key.
+models:
+  - name: fact_orders
+    description: Olist sales, one row per order item.
+    columns:
+      - name: order_item_sk
+        data_tests: [unique, not_null]
+      - name: date_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_date'), field: date_sk}
+      - name: customer_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_customer'), field: customer_sk}
+      - name: product_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_product'), field: product_sk}
+      - name: seller_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_seller'), field: seller_sk}
+      - name: status_category
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [COMPLETED, IN_PROGRESS, PENDING, FAILED, OTHER]
+      - name: total_payment_value
+        data_tests: [non_negative]
+
+  - name: fact_reviews
+    description: Olist order reviews, one row per (review_id, order_id).
+    columns:
+      - name: review_sk
+        data_tests: [unique, not_null]
+      - name: date_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_date'), field: date_sk}
+      - name: customer_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_customer'), field: customer_sk}
+      - name: review_score
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5]
+                quote: false
+
+  - name: fact_click_orders
+    description: Clickstream orders.
+    columns:
+      - name: order_sk
+        data_tests: [unique, not_null]
+      - name: date_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_date'), field: date_sk}
+      - name: customer_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_click_customer'), field: customer_sk}
+      - name: device_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_device'), field: device_sk}
+      - name: source_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_traffic_source'), field: source_sk}
+      - name: total_usd
+        data_tests: [non_negative]
+
+  - name: fact_sessions
+    description: Clickstream web sessions.
+    columns:
+      - name: session_sk
+        data_tests: [unique, not_null]
+      - name: date_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_date'), field: date_sk}
+      - name: customer_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_click_customer'), field: customer_sk}
+      - name: device_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_device'), field: device_sk}
+      - name: source_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_traffic_source'), field: source_sk}
+
+  - name: fact_clickstream_events
+    description: Clickstream events (page views, cart actions, purchases).
+    columns:
+      - name: event_sk
+        data_tests: [unique, not_null]
+      - name: session_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('fact_sessions'), field: session_sk}
+              config: {where: "session_sk <> -1"}
+      - name: date_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_date'), field: date_sk}
+      - name: product_sk
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_click_product'), field: product_sk}
+
+  - name: fact_click_reviews
+    description: Clickstream product reviews.
+    columns:
+      - name: review_sk
+        data_tests: [unique, not_null]
+      - name: order_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('fact_click_orders'), field: order_sk}
+              config: {where: "order_sk <> -1"}
+      - name: product_sk
+        data_tests:
+          - unknown_member_ratio
+          - relationships:
+              arguments: {to: ref('dim_click_product'), field: product_sk}
+      - name: rating
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5]
+                quote: false

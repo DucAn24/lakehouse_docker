@@ -3,14 +3,15 @@ import sys
 from pyspark.sql.functions import col, trim, upper, current_timestamp, to_timestamp, coalesce, from_unixtime, when
 from pyspark.sql.types import IntegerType, DoubleType
 
-from common.config import create_spark_session, get_logger, BRONZE_BUCKET, SILVER_BUCKET
+from common.config import create_spark_session, get_logger
 from common.transforms import extract_cdc_latest
-from common.writers import write_with_metrics
+from common.tables import SILVER_KEYS, table_id
+from common.writers import upsert_with_metrics
 
 logger = get_logger("b2s.click_orders")
 
-BRONZE_PATH = f"{BRONZE_BUCKET}/clickstream.public.click_orders/"
-SILVER_PATH = f"{SILVER_BUCKET}/click_orders/"
+BRONZE_TABLE = table_id("bronze", "click_orders")
+SILVER_TABLE = table_id("silver", "click_orders")
 
 
 def parse_order_time(column):
@@ -29,7 +30,7 @@ def parse_order_time(column):
 
 
 def run(spark):
-    df = spark.read.format("delta").load(BRONZE_PATH)
+    df = spark.table(BRONZE_TABLE)
     df_dedup = extract_cdc_latest(df, key_cols=["order_id"])
 
     df_silver = df_dedup.select(
@@ -46,11 +47,11 @@ def run(spark):
         current_timestamp().alias("processed_at"),
     ).filter(col("order_id").isNotNull())
 
-    write_with_metrics(df_silver, spark, "silver", "click_orders", SILVER_PATH)
+    upsert_with_metrics(df_silver, spark, "silver", "click_orders", SILVER_TABLE, SILVER_KEYS["click_orders"])
 
 
 if __name__ == "__main__":
-    spark = create_spark_session("B2S_ClickOrders", f"{SILVER_BUCKET}/")
+    spark = create_spark_session("B2S_ClickOrders")
     try:
         run(spark)
     except Exception:

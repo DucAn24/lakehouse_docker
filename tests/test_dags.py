@@ -50,7 +50,7 @@ def test_every_spark_task_submits_an_existing_job(bag):
     assert checked > 0
 
 
-def test_every_silver_and_gold_table_has_a_task(bag):
+def test_every_silver_table_has_a_task(bag):
     from common.tables import TABLES
 
     submitted = {
@@ -59,6 +59,23 @@ def test_every_silver_and_gold_table_has_a_task(bag):
         for task in dag.tasks
         if getattr(task, "application", None)
     }
-    for layer in ("silver", "gold"):
-        missing = set(TABLES[layer]) - submitted
-        assert not missing, f"{layer} tables without a DAG task: {sorted(missing)}"
+    missing = set(TABLES["silver"]) - submitted
+    assert not missing, f"silver tables without a DAG task: {sorted(missing)}"
+
+
+@pytest.mark.parametrize("dag_id", ["lakehouse_etl_pipeline", "lakehouse_silver_to_gold"])
+def test_gold_is_built_by_dbt_before_dq(bag, dag_id):
+    from gold_tasks import DBT_PROJECT_DIR
+
+    (build,) = [t for t in bag.dags[dag_id].tasks if t.task_id.endswith("dbt_build")]
+    assert f"--project-dir {DBT_PROJECT_DIR}" in build.bash_command
+    assert (ROOT / "dbt" / "dbt_project.yml").is_file()
+    downstream = {t.task_id.rsplit(".", 1)[-1] for t in build.get_flat_relatives(upstream=False)}
+    assert "dq_gold" in downstream
+
+
+def test_no_catalog_registration_tasks(bag):
+    """Polaris is shared by Spark and Trino: tables need no register step."""
+    task_ids = {t.task_id.rsplit(".", 1)[-1] for dag in bag.dags.values() for t in dag.tasks}
+    assert not {t for t in task_ids if t.startswith("register_")}
+    assert "maintain_iceberg_tables" in task_ids

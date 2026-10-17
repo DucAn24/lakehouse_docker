@@ -3,18 +3,19 @@ import sys
 from pyspark.sql.functions import col, trim, upper, current_timestamp, to_timestamp, coalesce, from_unixtime, when
 from pyspark.sql.types import IntegerType
 
-from common.config import create_spark_session, get_logger, BRONZE_BUCKET, SILVER_BUCKET
+from common.config import create_spark_session, get_logger
 from common.transforms import extract_cdc_latest
-from common.writers import write_with_metrics
+from common.tables import SILVER_KEYS, table_id
+from common.writers import upsert_with_metrics
 
 logger = get_logger("b2s.click_sessions")
 
-BRONZE_PATH = f"{BRONZE_BUCKET}/clickstream.public.click_sessions/"
-SILVER_PATH = f"{SILVER_BUCKET}/click_sessions/"
+BRONZE_TABLE = table_id("bronze", "click_sessions")
+SILVER_TABLE = table_id("silver", "click_sessions")
 
 
 def run(spark):
-    df = spark.read.format("delta").load(BRONZE_PATH)
+    df = spark.table(BRONZE_TABLE)
     df_dedup = extract_cdc_latest(df, key_cols=["session_id"])
 
     df_silver = df_dedup.select(
@@ -35,11 +36,11 @@ def run(spark):
         current_timestamp().alias("processed_at"),
     ).filter(col("session_id").isNotNull())
 
-    write_with_metrics(df_silver, spark, "silver", "click_sessions", SILVER_PATH)
+    upsert_with_metrics(df_silver, spark, "silver", "click_sessions", SILVER_TABLE, SILVER_KEYS["click_sessions"])
 
 
 if __name__ == "__main__":
-    spark = create_spark_session("B2S_ClickSessions", f"{SILVER_BUCKET}/")
+    spark = create_spark_session("B2S_ClickSessions")
     try:
         run(spark)
     except Exception:

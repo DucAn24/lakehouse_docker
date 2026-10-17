@@ -5,7 +5,7 @@
 Fails (exit 1) when:
   - a `from common.<mod> import <name>` does not resolve, or old flat imports (utils, config, ...) remain
   - a DAG references a job file that does not exist
-  - a silver/gold table in common/tables.py has no job file
+  - a silver table in common/tables.py has no job file, or the gold tables and the dbt models differ
   - the data quality rules (common/quality.py) and the table registry disagree
 """
 
@@ -19,6 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "spark" / "app"
 DAGS = ROOT / "airflow" / "dags"
+DBT_MODELS = ROOT / "dbt" / "models"
 problems: list[str] = []
 
 
@@ -64,7 +65,6 @@ consts = {
     "JOBS_DIR": APP / "jobs",
     "BRONZE_JOBS": APP / "jobs" / "bronze",
     "SILVER_JOBS": APP / "jobs" / "silver",
-    "GOLD_JOBS": APP / "jobs" / "gold",
     "OPS_JOBS": APP / "jobs" / "ops",
 }
 dag_paths = 0
@@ -74,9 +74,6 @@ for dag_file in sorted(DAGS.glob("*.py")):
         target = consts[const] / rest.lstrip("/")
         if not target.is_file():
             problems.append(f"{rel(dag_file)}: job not found {rel(target)}")
-for layer in ("bronze", "silver", "gold"):
-    if not (APP / "jobs" / layer / "register_tables.py").is_file():
-        problems.append(f"missing spark/app/jobs/{layer}/register_tables.py")
 
 # 3. table registry <-> job files <-> quality rules ----------------------------------------
 registry: dict[str, list[str]] = {}
@@ -88,14 +85,23 @@ for node in parse(APP / "common" / "tables.py").body:
         elif name == "_BRONZE_TOPICS":
             registry[name] = [k.value for k in node.value.keys]
 
-job_names = {p.stem for p in (APP / "jobs").rglob("*.py")}
 for name in ("_SILVER_TABLES", "_GOLD_TABLES", "_BRONZE_TOPICS"):
     if name not in registry:
         problems.append(f"common/tables.py: {name} not found as a literal assignment")
         registry[name] = []
-for table in registry["_SILVER_TABLES"] + registry["_GOLD_TABLES"]:
+
+job_names = {p.stem for p in (APP / "jobs").rglob("*.py")}
+for table in registry["_SILVER_TABLES"]:
     if table not in job_names:
         problems.append(f"common/tables.py: table {table} has no job file under spark/app/jobs/")
+
+# gold tables are dbt models (dbt/models/**/<table>.sql)
+dbt_models = {p.stem for p in DBT_MODELS.rglob("*.sql")}
+if dbt_models != set(registry["_GOLD_TABLES"]):
+    problems.append(
+        f"gold: tables without a dbt model={sorted(set(registry['_GOLD_TABLES']) - dbt_models)}, "
+        f"dbt models not in common/tables.py={sorted(dbt_models - set(registry['_GOLD_TABLES']))}"
+    )
 
 quality: dict[str, list[str]] = {}
 for node in parse(APP / "common" / "quality.py").body:

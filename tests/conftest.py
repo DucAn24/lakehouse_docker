@@ -1,9 +1,12 @@
 """Shared test setup.
 
-Spark-backed tests run a local Spark session with Delta against a temp "lake" directory instead
-of MinIO: the bucket env vars are set *before* `common.config` is imported, so every job and the
-table registry resolve their paths under that directory. They are skipped when Java or
-delta-spark is missing; run them with `pip install -r tests/requirements.txt` and a JDK 17+.
+Spark-backed tests run a local Spark session built by the real `common.config.create_spark_session`,
+writing Iceberg tables to the `lakehouse` catalog:
+  - with Docker: a throwaway Polaris + S3 (SeaweedFS) (iceberg_lake.py), the same REST catalog as the stack;
+    Trino joins it on demand (fixture `trino_lake`) so dbt builds gold over the very same tables;
+  - without Docker: a local file-based Iceberg catalog under a temp dir (gold tests skip).
+They are skipped when Java is missing; run them with `pip install -r tests/requirements.txt` and a
+JDK 17+. The Iceberg jars are fetched by Spark from Maven Central on first use.
 """
 
 from __future__ import annotations
@@ -12,16 +15,16 @@ import os
 import shutil
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "spark" / "app"))
+sys.path.insert(0, str(ROOT / "airflow" / "dags"))
 
 LAKE = Path(tempfile.mkdtemp(prefix="lakehouse_test_"))
-for _layer in ("bronze", "silver", "gold"):
-    os.environ[f"{_layer.upper()}_BUCKET"] = (LAKE / _layer).as_uri()
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -34,30 +37,57 @@ def _java_available() -> bool:
 
 
 @pytest.fixture(scope="session")
-def spark():
+def iceberg_lake():
+    """S3 (SeaweedFS) + Polaris containers (see iceberg_lake.py), or None without Docker."""
+    from iceberg_lake import IcebergLake, docker_available
+
+    if not docker_available():
+        yield None
+        return
+    lake = IcebergLake()
+    try:
+        lake.start()
+        yield lake
+    finally:
+        lake.stop()
+
+
+@pytest.fixture(scope="session")
+def spark(request):
     if not _java_available():
         pytest.skip("Java not found (Spark tests need a JDK 17+)")
-    delta = pytest.importorskip("delta", reason="delta-spark not installed")
-    from pyspark.sql import SparkSession
+    pytest.importorskip("pyspark", reason="pyspark not installed")
+    from spark_submit_defaults import SPARK_PACKAGES
 
-    builder = (
-        SparkSession.builder.master("local[2]")
-        .appName("lakehouse-tests")
-        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
-        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-        .config("spark.sql.ansi.enabled", "false")  # same as common.config.create_spark_session
-        .config("spark.sql.shuffle.partitions", "2")
-        .config("spark.sql.session.timeZone", "UTC")
-        .config("spark.ui.enabled", "false")
-        .config("spark.sql.warehouse.dir", str(LAKE / "warehouse"))
+    lake = request.getfixturevalue("iceberg_lake")
+    if lake is not None:
+        os.environ.update(lake.spark_env())
+    else:
+        os.environ.update(ICEBERG_CATALOG_TYPE="hadoop", ICEBERG_WAREHOUSE=(LAKE / "warehouse").as_uri())
+    os.environ["PYSPARK_SUBMIT_ARGS"] = (
+        f"--master local[2] --packages {SPARK_PACKAGES} --conf spark.ui.enabled=false pyspark-shell"
     )
-    session = delta.pip_utils.configure_spark_with_delta_pip(builder).getOrCreate()
+    from common.config import create_spark_session
+
+    session = create_spark_session("lakehouse-tests")
+    session.conf.set("spark.sql.shuffle.partitions", "2")
+    session.conf.set("spark.sql.session.timeZone", "UTC")
     session.sparkContext.setLogLevel("ERROR")
     yield session
     session.stop()
 
 
+@pytest.fixture(scope="session")
+def trino_lake(spark, iceberg_lake):
+    """Trino on the test catalog, to run the dbt gold models (needs Docker and dbt-trino)."""
+    pytest.importorskip("dbt.adapters.trino", reason="dbt-trino not installed")
+    if iceberg_lake is None:
+        pytest.skip("Docker not available (the dbt gold models run on Trino + Polaris + S3 (SeaweedFS) containers)")
+    iceberg_lake.start_trino()
+    return iceberg_lake
+
+
 @pytest.fixture()
-def tmp_delta(tmp_path):
-    """URI of a fresh, empty directory for a throwaway Delta table."""
-    return (tmp_path / "table").as_uri()
+def tmp_table(spark):
+    """Identifier of a fresh, not yet existing Iceberg table."""
+    return f"lakehouse.unit.t_{uuid.uuid4().hex[:12]}"

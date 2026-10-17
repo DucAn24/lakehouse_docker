@@ -1,4 +1,4 @@
-"""Reusable DataFrame transforms: CDC dedup, timestamp parsing, surrogate keys."""
+"""Reusable DataFrame transforms: CDC dedup, timestamp parsing."""
 
 from __future__ import annotations
 
@@ -6,11 +6,8 @@ from pyspark.sql import DataFrame
 from pyspark.sql.functions import (
     coalesce,
     col,
-    current_timestamp,
     desc,
     from_unixtime,
-    lit,
-    monotonically_increasing_id,
     row_number,
     when,
 )
@@ -35,11 +32,6 @@ def safe_to_timestamp(column):
     ).otherwise(
         column.cast(TimestampType()),
     )
-
-
-def generate_surrogate_key(df: DataFrame, key_column_name: str = "sk") -> DataFrame:
-    """Add an auto-incrementing surrogate key column starting from 1."""
-    return df.withColumn(key_column_name, monotonically_increasing_id() + 1)
 
 
 def extract_cdc_latest(
@@ -81,23 +73,3 @@ def extract_cdc_latest(
         .filter((col("_row_num") == 1) & (col(_OP) != "d"))
         .drop("_row_num", _OP, _TS)
     )
-
-
-def with_unknown_member(df: DataFrame, values: dict[str, object]) -> DataFrame:
-    """Append the -1 UNKNOWN dimension row, built by column name from df's schema.
-
-    Columns not in `values` are NULL, except `etl_loaded_at` which gets current_timestamp()
-    (same clock as the real rows). Unknown names in `values` raise, so a renamed or dropped
-    column fails loudly instead of misaligning the row.
-    """
-    extra = set(values) - set(df.columns)
-    if extra:
-        raise ValueError(f"unknown member values for columns not in schema: {sorted(extra)}")
-    exprs = []
-    for field in df.schema.fields:
-        if field.name == "etl_loaded_at":
-            expr = current_timestamp()
-        else:
-            expr = lit(values.get(field.name))
-        exprs.append(expr.cast(field.dataType).alias(field.name))
-    return df.unionByName(df.sparkSession.range(1).select(*exprs))

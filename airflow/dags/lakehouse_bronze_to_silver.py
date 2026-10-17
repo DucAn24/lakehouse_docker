@@ -3,7 +3,7 @@ lakehouse_bronze_to_silver
 ==========================
 Standalone Silver DAG for the lakehouse.
 
-Transforms bronze Delta tables into cleaned silver tables. The Spark jobs run
+Transforms bronze Iceberg tables into cleaned silver tables (MERGE upserts). The Spark jobs run
 one after another so a local Spark setup does not need to execute them in
 parallel. When finished, this DAG triggers the gold DAG.
 """
@@ -15,13 +15,15 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 
-from spark_submit_defaults import SILVER_JOBS, common_kwargs, dq_kwargs, register_kwargs
+from alerting import notify_failure
+from spark_submit_defaults import SILVER_JOBS, common_kwargs, dq_kwargs
 
 DEFAULT_ARGS = {
     "owner": "data-engineering",
     "retries": 0,
     "retry_delay": timedelta(minutes=5),
     "execution_timeout": timedelta(hours=2),
+    "on_failure_callback": notify_failure,
 }
 
 
@@ -95,11 +97,6 @@ with DAG(
         **common_kwargs("B2S_ClickReviews", f"{SILVER_JOBS}/clickstream/click_reviews.py"),
     )
 
-    register_silver_tables = SparkSubmitOperator(
-        task_id="register_silver_tables",
-        **register_kwargs("silver"),
-    )
-
     silver_tasks = [
         b2s_customers,
         b2s_sellers,
@@ -123,4 +120,4 @@ with DAG(
 
     dq_silver = SparkSubmitOperator(task_id="dq_silver", **dq_kwargs("silver"))
 
-    silver_tasks[-1] >> register_silver_tables >> dq_silver
+    silver_tasks[-1] >> dq_silver

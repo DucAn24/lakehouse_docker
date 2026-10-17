@@ -1,10 +1,12 @@
 """End-to-end run of the whole pipeline on the fixtures in bronze_fixtures.py.
 
-bronze (seeded here) -> every silver job -> silver DQ gate -> every gold job -> gold DQ gate.
-Jobs run through their real `run(spark)` entry points, reading and writing Delta under the temp
-lake configured in conftest.py. Kafka ingestion (`kafka_to_bronze`) is out of scope here.
+bronze (seeded here) -> every silver job -> silver DQ gate -> dbt gold models -> gold DQ gate.
+Silver jobs run through their real `run(spark)` entry points, reading and writing Iceberg tables in
+the test `lakehouse` catalog (conftest.py); the dbt project builds gold on Trino over the same Polaris
+catalog (conftest `trino_lake`, needs Docker), and Spark reads that gold back for the DQ gate and the
+assertions. Kafka ingestion (`kafka_to_bronze`) is out of scope here.
 
-Tests share one pipeline run (module-scoped fixture) and are ordered by layer.
+Tests share one pipeline run (module-scoped fixtures) and are ordered by layer.
 """
 
 from __future__ import annotations
@@ -16,9 +18,10 @@ import pytest
 from pyspark.sql.functions import col
 
 from bronze_fixtures import BRONZE
-from common.config import METRICS_PATH
+from common.catalog import create_or_replace
 from common.quality import CHECKS, run_quality_checks
-from common.tables import TABLES, table_path
+from common.tables import METRICS_TABLE, SILVER_KEYS, TABLES, table_id
+from common.writers import snapshot_ids
 
 JOBS = Path(__file__).resolve().parents[1] / "spark" / "app" / "jobs"
 
@@ -35,7 +38,7 @@ def _seed_bronze(spark):
         after = ", ".join(f"{c}: string" for c in columns)
         schema = f"op string, ts_ms long, after struct<{after}>"
         rows = [(op, ts, values) for op, ts, values in events]
-        spark.createDataFrame(rows, schema).write.format("delta").mode("overwrite").save(table_path("bronze", table))
+        create_or_replace(spark.createDataFrame(rows, schema), table_id("bronze", table))
 
 
 @pytest.fixture(scope="module")
@@ -44,33 +47,86 @@ def lake(spark):
     assert run_quality_checks(spark, "bronze", CHECKS["bronze"]()), "bronze quality gate failed"
 
     def read(layer: str, table: str):
-        return spark.read.format("delta").load(table_path(layer, table))
+        return spark.table(table_id(layer, table))
 
-    for layer in ("silver", "gold"):
-        for table in TABLES[layer]:
-            _module(layer, table).run(spark)
-        assert run_quality_checks(spark, layer, CHECKS[layer]()), f"{layer} quality gate failed"
+    for table in TABLES["silver"]:
+        _module("silver", table).run(spark)
+    assert run_quality_checks(spark, "silver", CHECKS["silver"]()), "silver quality gate failed"
     return read
 
 
+@pytest.fixture(scope="module")
+def gold(spark, lake, trino_lake, tmp_path_factory):
+    """`dbt build` of the gold models on Trino over the silver tables, then the gold DQ gate.
+
+    Mirrors the DAG: Trino sees the silver tables and monitoring.pipeline_metrics Spark wrote, through
+    the shared Polaris catalog. Returns the same reader as `lake`.
+    """
+    trino_lake.dbt_build(tmp_path_factory.mktemp("dbt"))
+    assert run_quality_checks(spark, "gold", CHECKS["gold"]()), "gold quality gate failed"
+    return lake
+
+
+def _recorded_metrics(spark) -> set[tuple[str, str]]:
+    metrics = spark.table(METRICS_TABLE).filter(col("status") == "success")
+    return {(r.layer, r.table_name) for r in metrics.collect()}
+
+
 # ---- every table is produced -------------------------------------------------------------
-@pytest.mark.parametrize("layer", ["silver", "gold"])
-def test_every_table_is_written_and_non_empty(lake, layer):
-    for table in TABLES[layer]:
-        assert lake(layer, table).count() > 0, f"{layer}.{table} is empty"
+def test_every_silver_table_is_written_and_non_empty(lake):
+    for table in TABLES["silver"]:
+        assert lake("silver", table).count() > 0, f"silver.{table} is empty"
 
 
-def test_metrics_recorded_for_every_table(spark, lake):
-    metrics = spark.read.format("delta").load(METRICS_PATH).filter(col("status") == "success")
-    recorded = {(r.layer, r.table_name) for r in metrics.collect()}
-    expected = {(layer, t) for layer in ("silver", "gold") for t in TABLES[layer]}
-    assert expected <= recorded
+def test_every_gold_table_is_written_and_non_empty(gold):
+    for table in TABLES["gold"]:
+        assert gold("gold", table).count() > 0, f"gold.{table} is empty"
+
+
+def test_metrics_recorded_for_every_silver_table(spark, lake):
+    assert {("silver", t) for t in TABLES["silver"]} <= _recorded_metrics(spark)
+
+
+def test_dbt_records_metrics_for_every_gold_model(spark, gold):
+    """The dbt on-run-end hook writes one success row per model, with the rows the model wrote."""
+    metrics = spark.table(METRICS_TABLE).filter((col("layer") == "gold") & (col("status") == "success"))
+    assert {r.table_name: r.row_count for r in metrics.collect()} == {t: gold("gold", t).count() for t in TABLES["gold"]}
 
 
 def test_jobs_are_idempotent(spark, lake):
     before = lake("silver", "olist_orders").count()
     _module("silver", "olist_orders").run(spark)
     assert lake("silver", "olist_orders").count() == before
+
+
+def test_silver_rerun_is_an_incremental_noop(spark, lake):
+    stamps = {r.order_id: r.processed_at for r in lake("silver", "olist_orders").collect()}
+    _module("silver", "olist_orders").run(spark)
+    assert {r.order_id: r.processed_at for r in lake("silver", "olist_orders").collect()} == stamps
+    last = (
+        spark.table(METRICS_TABLE)
+        .filter((col("table_name") == "olist_orders") & (col("layer") == "silver"))
+        .orderBy(col("recorded_at").desc())
+        .first()
+    )
+    assert (last.write_mode, last.rows_inserted, last.rows_updated, last.rows_deleted) == ("merge", 0, 0, 0)
+
+
+def test_silver_tables_are_iceberg_v2_and_keys_match_dq(spark, lake):
+    checks = CHECKS["silver"]()
+    assert set(SILVER_KEYS) == set(TABLES["silver"])
+    for table, ident in TABLES["silver"].items():
+        assert SILVER_KEYS[table] == checks[table]["primary_keys"], table
+        props = {r.key: r.value for r in spark.sql(f"SHOW TBLPROPERTIES {ident}").collect()}
+        assert props["format-version"] == "2", table
+        assert snapshot_ids(spark, ident), table
+
+
+def test_trino_and_spark_see_the_same_gold_snapshot(spark, gold, trino_lake):
+    """One catalog: Trino reads exactly the rows Spark sees, with no registration step."""
+    for table in ("fact_orders", "dim_customer"):
+        ((count,),) = trino_lake.execute(f"SELECT count(*) FROM lakehouse.gold.{table}")
+        assert count == gold("gold", table).count(), table
 
 
 # ---- silver business rules ---------------------------------------------------------------
@@ -171,25 +227,25 @@ def test_silver_click_reviews_sentiment_and_text(lake):
         ("dim_click_product", "product_sk"),
     ],
 )
-def test_dimensions_have_unique_keys_and_unknown_member(lake, table, key):
-    df = lake("gold", table)
+def test_dimensions_have_unique_keys_and_unknown_member(gold, table, key):
+    df = gold("gold", table)
     keys = [r[key] for r in df.select(key).collect()]
     assert len(keys) == len(set(keys))
     assert keys.count(-1) == 1, f"{table} must have exactly one UNKNOWN (-1) member"
 
 
-def test_dim_customer_one_row_per_unique_customer(lake):
-    ids = [r.customer_unique_id for r in lake("gold", "dim_customer").collect()]
+def test_dim_customer_one_row_per_unique_customer(gold):
+    ids = [r.customer_unique_id for r in gold("gold", "dim_customer").collect()]
     assert sorted(ids) == ["UNKNOWN", "u1", "u2"]
 
 
-def test_dim_date_covers_order_years(lake):
-    keys = {r.date_sk for r in lake("gold", "dim_date").collect()}
-    assert {20180101, 20181231} <= keys
+def test_dim_date_covers_every_fact_year(gold):
+    keys = {r.date_sk for r in gold("gold", "dim_date").collect()}
+    assert {20180101, 20181231, 20240101, 20241231} <= keys  # olist 2018 + clickstream 2024
 
 
-def test_fact_orders_grain_and_foreign_keys(lake):
-    df = lake("gold", "fact_orders")
+def test_fact_orders_grain_and_foreign_keys(gold):
+    df = gold("gold", "fact_orders")
     assert df.count() == 3  # one row per order item
     assert df.filter((col("customer_sk") == -1) | (col("product_sk") == -1) | (col("seller_sk") == -1)).count() == 0
     rows = {(r.order_id, r.order_item_id): r for r in df.collect()}
@@ -199,26 +255,26 @@ def test_fact_orders_grain_and_foreign_keys(lake):
     assert rows[("o1", 1)].date_sk == 20180101
 
 
-def test_fact_reviews_flags(lake):
-    rows = {r.review_id: r for r in lake("gold", "fact_reviews").collect()}
+def test_fact_reviews_flags(gold):
+    rows = {r.review_id: r for r in gold("gold", "fact_reviews").collect()}
     assert (rows["r1"].is_positive, rows["r1"].is_negative) == (1, 0)
     assert (rows["r2"].is_positive, rows["r2"].is_negative) == (0, 1)
 
 
-def test_fact_click_orders_resolves_dimensions(lake):
-    (order,) = lake("gold", "fact_click_orders").collect()
+def test_fact_click_orders_resolves_dimensions(gold):
+    (order,) = gold("gold", "fact_click_orders").collect()
     assert order.date_sk == 20240101
     assert -1 not in (order.customer_sk, order.device_sk, order.source_sk)
 
 
-def test_click_facts_keep_their_grain(lake):
-    assert lake("gold", "fact_sessions").count() == 2
-    assert lake("gold", "fact_clickstream_events").count() == 2
-    assert lake("gold", "fact_click_reviews").count() == 1
+def test_click_facts_keep_their_grain(gold):
+    assert gold("gold", "fact_sessions").count() == 2
+    assert gold("gold", "fact_clickstream_events").count() == 2
+    assert gold("gold", "fact_click_reviews").count() == 1
 
 
-def test_click_facts_link_to_parent_facts(lake):
-    events = lake("gold", "fact_clickstream_events")
+def test_click_facts_link_to_parent_facts(gold):
+    events = gold("gold", "fact_clickstream_events")
     assert events.filter(col("session_sk") == -1).count() == 0
     assert events.filter(col("product_sk") == -1).count() == 0
-    assert lake("gold", "fact_click_reviews").filter(col("order_sk") == -1).count() == 0
+    assert gold("gold", "fact_click_reviews").filter(col("order_sk") == -1).count() == 0

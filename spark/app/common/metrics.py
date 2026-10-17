@@ -1,16 +1,19 @@
 """Pipeline metrics tracker.
 
-Logs execution metadata (row counts, duration, status) to a Delta table
-at METRICS_PATH so runs can be monitored via Trino / Metabase.
+Logs execution metadata (row counts, duration, status) to the Iceberg table
+common.tables.METRICS_TABLE so runs can be monitored via Trino / Grafana / Metabase.
 """
+
+from __future__ import annotations
 
 import time
 import logging
 from datetime import datetime, timezone
 
-from pyspark.sql import SparkSession, Row
+from pyspark.sql import SparkSession
 
-from common.config import METRICS_PATH
+from common.catalog import append_rows
+from common.tables import METRICS_TABLE
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +25,19 @@ _METRICS_SCHEMA = [
     "duration_sec",  # wall-clock seconds
     "status",  # success | failed
     "error_message",  # empty on success
-    "recorded_at",  # write timestamp
+    "recorded_at",  # write timestamp (UTC, 'yyyy-MM-dd HH:mm:ss')
+    "write_mode",  # overwrite | merge
+    "rows_inserted",  # merge: rows inserted (overwrite: all rows)
+    "rows_updated",  # merge: rows changed
+    "rows_deleted",  # merge: rows removed because the key vanished from the source
 ]
+
+# Explicit DDL: the optional counters may be NULL, which Row-based inference cannot type.
+_METRICS_DDL = (
+    "run_id string, layer string, table_name string, row_count long, duration_sec double, "
+    "status string, error_message string, recorded_at string, write_mode string, "
+    "rows_inserted long, rows_updated long, rows_deleted long"
+)
 
 
 class MetricsTimer:
@@ -72,22 +86,30 @@ def _write_metric(
     duration_sec: float,
     status: str,
     error_message: str = "",
+    write_mode: str = "overwrite",
+    rows_inserted: int | None = None,
+    rows_updated: int | None = None,
+    rows_deleted: int | None = None,
 ):
-    """Append a single metric row to the metrics Delta table."""
+    """Append a single metric row to the metrics table."""
     now = datetime.now(timezone.utc)
-    row = Row(
-        run_id=now.isoformat(),
-        layer=layer,
-        table_name=table_name,
-        row_count=int(row_count),
-        duration_sec=float(duration_sec),
-        status=status,
-        error_message=error_message[:500],  # truncate long errors
-        recorded_at=now.strftime("%Y-%m-%d %H:%M:%S"),
+    row = (
+        now.isoformat(),
+        layer,
+        table_name,
+        int(row_count),
+        float(duration_sec),
+        status,
+        error_message[:500],  # truncate long errors
+        now.strftime("%Y-%m-%d %H:%M:%S"),
+        write_mode,
+        rows_inserted,
+        rows_updated,
+        rows_deleted,
     )
     try:
-        df = spark.createDataFrame([row])
-        df.write.format("delta").mode("append").save(METRICS_PATH)
+        # append_rows merges the schema: a table written before a counter existed gains the column
+        append_rows(spark.createDataFrame([row], _METRICS_DDL), METRICS_TABLE)
     except Exception:
         # Metrics should never break the pipeline
         logger.warning(
@@ -106,8 +128,12 @@ def record_metric(
     duration_sec: float,
     status: str = "success",
     error_message: str = "",
+    **extra,
 ):
-    """Public convenience function to record a single metric."""
+    """Public convenience function to record a single metric.
+
+    ``extra`` carries the optional write_mode / rows_inserted / rows_updated / rows_deleted.
+    """
     _write_metric(
         spark,
         layer=layer,
@@ -116,4 +142,5 @@ def record_metric(
         duration_sec=duration_sec,
         status=status,
         error_message=error_message,
+        **extra,
     )

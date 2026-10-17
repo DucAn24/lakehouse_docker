@@ -1,13 +1,11 @@
-"""common.transforms and common.writers / common.metrics against a local Spark + Delta."""
+"""common.transforms and common.metrics against a local Spark session (Iceberg catalog)."""
 
 from __future__ import annotations
 
-import pytest
-from pyspark.sql.functions import col, current_timestamp, date_format
+from pyspark.sql.functions import col, date_format
 
 from common.metrics import record_metric
-from common.transforms import extract_cdc_latest, generate_surrogate_key, safe_to_timestamp, with_unknown_member
-from common.writers import write_with_metrics
+from common.transforms import extract_cdc_latest, safe_to_timestamp
 
 
 def _cdc(spark, rows):
@@ -68,81 +66,23 @@ def test_extract_cdc_latest_payload_column_named_op_is_preserved(spark):
     assert (row.id, row.op) == ("a", "payload")
 
 
-def test_with_unknown_member_builds_row_by_name(spark):
-    df = spark.createDataFrame([(1, "x")], "sk long, name string").withColumn("etl_loaded_at", current_timestamp())
-    out = with_unknown_member(df, {"sk": -1, "name": "UNKNOWN"})
-    assert {(r.sk, r.name) for r in out.collect()} == {(1, "x"), (-1, "UNKNOWN")}
-    assert out.filter("etl_loaded_at is null").count() == 0
-    with pytest.raises(ValueError):
-        with_unknown_member(df, {"nope": 1})
-
-
 def test_extract_cdc_latest_one_row_per_key(spark):
     df = _cdc(spark, [("c", 1, "a", "v1"), ("u", 2, "a", "v2"), ("u", 3, "a", "v3")])
     rows = extract_cdc_latest(df, key_cols=["id"]).collect()
     assert [(r.id, r.value) for r in rows] == [("a", "v3")]
 
 
-def test_generate_surrogate_key_is_unique_and_starts_at_one(spark):
-    df = generate_surrogate_key(spark.range(50).toDF("n"), "sk")
-    keys = [r.sk for r in df.collect()]
-    assert len(set(keys)) == 50
-    assert min(keys) >= 1
+def test_record_metric_writes_a_row(spark):
+    from common.tables import METRICS_TABLE
+
+    record_metric(spark, "silver", "unit_metric", 3, 0.5)
+    rows = spark.table(METRICS_TABLE).filter(col("table_name") == "unit_metric").collect()
+    assert [(r.layer, r.row_count, r.status) for r in rows] == [("silver", 3, "success")]
 
 
-def test_write_with_metrics_writes_data_and_records_success(spark, tmp_delta):
-    df = spark.createDataFrame([(1,), (2,), (3,)], "n int")
-    assert write_with_metrics(df, spark, "silver", "unit_table", tmp_delta) == 3
-    assert spark.read.format("delta").load(tmp_delta).count() == 3
-
-    from common.config import METRICS_PATH
-
-    metric = (
-        spark.read.format("delta")
-        .load(METRICS_PATH)
-        .filter((col("table_name") == "unit_table") & (col("status") == "success"))
-        .collect()
-    )
-    assert [m.row_count for m in metric] == [3]
-
-
-def test_write_with_metrics_overwrites_on_rerun(spark, tmp_delta):
-    write_with_metrics(spark.createDataFrame([(1,), (2,)], "n int"), spark, "silver", "rerun", tmp_delta)
-    write_with_metrics(spark.createDataFrame([(9,)], "n int"), spark, "silver", "rerun", tmp_delta)
-    assert [r.n for r in spark.read.format("delta").load(tmp_delta).collect()] == [9]
-
-
-def test_write_with_metrics_records_failure_and_reraises(spark, tmp_delta):
-    class Boom(Exception):
-        pass
-
-    class BrokenFrame:
-        """Stands in for a DataFrame whose write fails."""
-
-        @property
-        def write(self):
-            raise Boom("disk full")
-
-    with pytest.raises(Boom):
-        write_with_metrics(BrokenFrame(), spark, "silver", "broken_table", tmp_delta)
-
-    from common.config import METRICS_PATH
-
-    failed = (
-        spark.read.format("delta")
-        .load(METRICS_PATH)
-        .filter((col("table_name") == "broken_table") & (col("status") == "failed"))
-        .collect()
-    )
-    assert len(failed) == 1
-    assert "disk full" in failed[0].error_message
-
-
-def test_record_metric_never_raises(spark, monkeypatch, tmp_path):
+def test_record_metric_never_raises(spark, monkeypatch):
     import common.metrics as metrics
 
-    blocker = tmp_path / "a_file"
-    blocker.write_text("x")
-    # a Delta path below a regular file cannot be created; the failure must be swallowed
-    monkeypatch.setattr(metrics, "METRICS_PATH", (blocker / "metrics").as_uri())
+    # a table in a catalog that does not exist cannot be written; the failure must be swallowed
+    monkeypatch.setattr(metrics, "METRICS_TABLE", "no_such_catalog.monitoring.pipeline_metrics")
     record_metric(spark, "gold", "t", 1, 0.1)

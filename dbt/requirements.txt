@@ -1,0 +1,4 @@
+# dbt for the gold layer. Installed in its own venv in the airflow image (dbt-core's pins clash with
+# Airflow's constraints) and by tests/requirements.txt.
+dbt-core==1.12.5
+dbt-trino==1.10.5

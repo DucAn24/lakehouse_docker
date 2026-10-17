@@ -1,0 +1,23 @@
+# Gold layer: Kimball star schema built from the silver Iceberg tables with dbt on Trino.
+#   dbt build --project-dir dbt --profiles-dir dbt     (models + their tests, in DAG order)
+name: lakehouse
+version: "1.0.0"
+profile: lakehouse
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+clean-targets: ["target", "logs"]
+
+flags:
+  send_anonymous_usage_stats: false
+
+models:
+  lakehouse:
+    +materialized: table
+    # CREATE OR REPLACE TABLE: an atomic new Iceberg snapshot of the same table (keeps its history and
+    # time travel), instead of dbt's default create-tmp-then-rename, which would start a new table.
+    +on_table_exists: replace
+
+on-run-end:
+  - "{{ record_run_metrics(results) }}"

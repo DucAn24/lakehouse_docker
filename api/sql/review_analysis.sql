@@ -7,10 +7,10 @@ SELECT
     SUM(r.is_negative) AS negative_reviews,
     SUM(r.is_neutral) AS neutral_reviews,
     ROUND(SUM(r.is_positive) * 100.0 / COUNT(*), 2) AS positive_rate_pct
-FROM delta.gold.fact_reviews r
-JOIN delta.gold.fact_orders f ON r.order_id = f.order_id
-JOIN delta.gold.dim_product p ON f.product_sk = p.product_sk
-JOIN delta.gold.dim_date d ON r.date_sk = d.date_sk
+FROM lakehouse.gold.fact_reviews r
+JOIN lakehouse.gold.fact_orders f ON r.order_id = f.order_id
+JOIN lakehouse.gold.dim_product p ON f.product_sk = p.product_sk
+JOIN lakehouse.gold.dim_date d ON r.date_sk = d.date_sk
 GROUP BY p.product_category_name_english
 ORDER BY total_reviews DESC
 LIMIT 5

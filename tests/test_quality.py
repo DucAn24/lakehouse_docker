@@ -109,7 +109,7 @@ def test_broken_rule_fails_instead_of_raising(spark, tmp_delta):
     _save(spark, [(1,)], "id int", tmp_delta)
     ok, results = validate_table(spark, "t", tmp_delta, ["id"], {"r": col("missing_column") > 0})
     assert not ok
-    assert _by_check(results)["r"]["detail"].startswith("-1/")
+    assert _by_check(results)["r"]["detail"].startswith("ERROR evaluating rule")
 
 
 def test_row_filter_restricts_validated_rows(spark, tmp_delta):

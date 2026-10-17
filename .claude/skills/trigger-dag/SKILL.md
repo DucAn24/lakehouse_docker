@@ -12,4 +12,4 @@ docker compose exec airflow airflow tasks states-for-dag-run <dag_id> <run_id>
 docker compose exec airflow airflow tasks test <dag_id> <task_id> 2026-01-01
 ```
 
-Pipeline order: bronze → silver (spark-submit) → `dbt_build` → `register_gold_tables` → `dq_gold`. For a failed task, read its log: `docker compose logs airflow --tail=200`, and for Spark jobs check spark-master. Offline DAG checks: `python scripts/check_dags.py`.
+Pipeline order: bronze → silver (spark-submit) → `dbt_build` → `dq_gold` → `maintain_iceberg_tables`. For a failed task, read its log: `docker compose logs airflow --tail=200`, and for Spark jobs check spark-master. Offline DAG checks: `python scripts/check_dags.py`.

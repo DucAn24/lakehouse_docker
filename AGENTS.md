@@ -3,8 +3,9 @@
 Standalone Docker Compose port of the K3s/Helm lakehouse in the parent repo. Same pipeline, same code conventions (see `../AGENTS.md` for Spark/Gold/SQL conventions); only the runtime differs.
 
 - `docker-compose.yml` replaces `helm/lakehouse`. Service names = the old K8s service names (`postgres`, `minio`, `kafka`, `connect`, `trino`, `spark-master`, `airflow`), so no hostnames in code changed.
-- Catalog: Unity Catalog OSS (`unitycatalog`, catalog `lakehouse`) replaced Hive Metastore. Spark 4.0.4 / Delta 4.0.1 / `unitycatalog-spark_4.0_2.13:0.6.0`. Trino can't read Delta from UC OSS, so its `delta` catalog uses a file metastore on `s3://trino-metastore/`; `common.catalog.register_catalog_tables` registers every table in both. UC only accepts `s3://` locations (not `s3a://`).
-- Core stack by default; `--profile apps` adds metabase, grafana, kafka-ui, fastapi, catalog-api, portal.
+- Table format + catalog: Apache Iceberg (spec v2) in one Apache Polaris REST catalog `lakehouse` (service `polaris`, :8181; metadata in Postgres db `polaris`), shared by Spark, Trino/dbt, catalog-api (PyIceberg) and host clients (`examples/`: DuckDB, PyIceberg). Spark 4.0.4 / `iceberg-spark-runtime-4.0_2.13` + `iceberg-aws-bundle` 1.11.0 (package list in `spark/Dockerfile`, `airflow/Dockerfile`, `spark_submit_defaults.py`: keep in sync). The Trino catalog is also named `lakehouse` (`trino/catalog/lakehouse.properties`), so `lakehouse.<layer>.<table>` works in every engine; there is no registration step.
+- Polaris setup: `polaris-db-init` → `polaris-bootstrap` (root principal from `POLARIS_ROOT_CLIENT_ID/SECRET`) → `polaris` → `polaris-init` (`polaris/init.sh`, idempotent: catalog on `s3://lakehouse/`, grant, namespaces bronze/silver/gold/monitoring; the tests run it too). No credential vending (`stsUnavailable`, only `endpointInternal` set): every client uses its own MinIO keys and endpoint.
+- Core stack by default; `--profile apps` adds metabase, grafana, kafka-ui, fastapi, catalog-api, portal, polaris-console (:8088, built from apache/polaris-tools at a pinned commit).
 - **Code is bind-mounted** (`spark/app`, `airflow/dags`, `dbt/`, `api/`, `catalog-api/`): edits apply without rebuild. Only Dockerfile / `requirements.txt` changes need `docker compose build <svc>`.
 - Secrets live in `.env` (gitignored); `.env.example` must keep placeholders (`MIMO_API_KEY=YOUR_MIMO_API_KEY`).
 - Code here is a copy of the parent repo's `spark/`, `airflow/`, `api/` — changes are NOT synced between the two.
@@ -14,19 +15,20 @@ Chatbot (`api/core/chatbot.py`, `--profile apps`): the schema in the system prom
 
 Spark code layout (`spark/app`, on `PYTHONPATH`):
 
-- `common/` shared package: `config` (session/env), `tables` (single table registry, layer → table → path), `transforms`, `writers`, `catalog`, `metrics`, `quality` (DQ rules).
-- `jobs/bronze/`, `jobs/silver/{olist,clickstream}/`: one spark-submit entry point per table, file name = table name. Each layer (gold too) has `register_tables.py`.
-- `jobs/ops/`: `data_quality.py --layer …`, `vacuum_tables.py`, `register_monitoring.py` (exposes `pipeline_metrics` + `data_quality_log` as `delta.monitoring.*` for the Grafana *Pipeline Monitoring* dashboard/alerts). `jobs/ops/show_customers.py` is ad-hoc, not run by Airflow. Postgres seed SQL: `postgres/sql/`.
-- Silver jobs write with `upsert_with_metrics(..., SILVER_KEYS[table])` (MERGE + Change Data Feed). New silver table → also add its key to `SILVER_KEYS`.
+- `common/` shared package: `config` (session/env; `iceberg_catalog_conf()` = Polaris REST, or a file-based catalog when `ICEBERG_CATALOG_TYPE=hadoop`), `tables` (single table registry, layer → table → identifier `lakehouse.<layer>.<table>`, `table_id()`), `transforms`, `writers`, `catalog` (`create_or_replace`, `append_rows`, `trino_execute`), `metrics`, `quality` (DQ rules).
+- Tables are always addressed by identifier (`spark.table(...)`, `writeTo(...)`), never by path.
+- `jobs/bronze/`, `jobs/silver/{olist,clickstream}/`: one spark-submit entry point per table, file name = table name.
+- `jobs/ops/`: `data_quality.py --layer …`, `maintain_tables.py` (Iceberg `expire_snapshots` / `remove_orphan_files` / `rewrite_manifests` on every table; task `maintain_iceberg_tables`). `lakehouse.monitoring.pipeline_metrics` + `data_quality_log` feed the Grafana *Pipeline Monitoring* dashboard/alerts. `jobs/ops/show_customers.py` is ad-hoc, not run by Airflow. Postgres seed SQL: `postgres/sql/`.
+- Silver jobs write with `upsert_with_metrics(..., table_id("silver", t), SILVER_KEYS[t])`: a SQL MERGE whose insert/update/delete counts are computed just before it; one snapshot per run, with row changes via `read_changes` (Iceberg changelog view). New silver table → also add its key to `SILVER_KEYS`.
 - New silver table → add the job, add it to `common/tables.py` and the rules in `common/quality.py`, add the task in the DAG (paths via `SILVER_JOBS` in `spark_submit_defaults.py`).
 - Import shared code as `from common.x import y`. No Python UDFs today, so executors never import project code; if you add one, ship `common/` with `--py-files`.
 
 Gold layer = dbt on Trino (`dbt/`, dbt-trino; pins in `dbt/requirements.txt`, installed in a separate venv `/opt/dbt-venv` in the airflow image):
 
-- `models/{dimensions,facts}/<table>.sql`, file name = gold table name; sources = `delta.silver.*` (`models/sources.yml`). Tests + docs in `_dimensions.yml` / `_facts.yml`; custom generic tests in `tests/generic/` (`unknown_member_ratio` = the 5 % unknown-FK tolerance).
-- Every model starts with `{{ config(properties=gold_properties()) }}`: pins the table to `s3://gold/<table>` (the `common/tables.py` path that UC registration, the gold DQ gate and VACUUM use); `on_table_exists: replace` → `CREATE OR REPLACE TABLE`, a new Delta version in place. Trino's Delta connector can't do that on `local://`/`file://`, only object storage.
+- `models/{dimensions,facts}/<table>.sql`, file name = gold table name; sources = `lakehouse.silver.*` (`models/sources.yml`). Tests + docs in `_dimensions.yml` / `_facts.yml`; custom generic tests in `tests/generic/` (`unknown_member_ratio` = the 5 % unknown-FK tolerance).
+- Every model starts with `{{ config(properties=gold_properties()) }}` (Iceberg `format_version = 2`; Polaris places the table under `s3://lakehouse/gold/`); `on_table_exists: replace` → `CREATE OR REPLACE TABLE`, a new Iceberg snapshot of the same table. Spark then reads gold from the same catalog (gold DQ gate, maintenance).
 - Surrogate keys: `hash_key([...])` (xxhash64 of the natural key, stable across rebuilds); each dimension has an UNKNOWN member `-1`, facts `coalesce(..., -1)`. Date keys: `date_key(ts)` → yyyyMMdd.
-- DAG: `dbt_build` (`airflow/dags/gold_tasks.py`, `dbt build` = models + tests) → `register_gold_tables` (UC; Trino already has the tables) → `dq_gold`. The `on-run-end` hook `record_run_metrics` writes each model run to `monitoring.pipeline_metrics`.
+- DAG: `dbt_build` (`airflow/dags/gold_tasks.py`, `dbt build` = models + tests) → `dq_gold` (→ `maintain_iceberg_tables` in the full pipeline). The `on-run-end` hook `record_run_metrics` writes each model run to `monitoring.pipeline_metrics`.
 - New gold table → add the model (+ tests in the yml), add it to `common/tables.py` and the rules in `get_gold_checks()` (`check_spark_layout.py` compares models vs registry).
 
 Verify:
@@ -39,4 +41,4 @@ find spark/app -name '*.py' -exec python -m py_compile {} +
 pip install -r tests/requirements.txt && python -m pytest tests   # needs JDK 17+ (Spark) and Docker (dbt gold); those tests skip otherwise
 ```
 
-Tests (`tests/`): registry/layout (no Spark), `common/` units, DQ rules, DAG structure (skipped without Airflow) and an end-to-end run (`test_pipeline_e2e.py`: tiny Debezium bronze fixtures in `bronze_fixtures.py` → every silver job → `dbt build` of gold → DQ gates) on local Spark + Delta; gold runs on throwaway Trino + MinIO containers (`trino_lake.py`, files moved with `docker cp`). `BRONZE_BUCKET`/`SILVER_BUCKET`/`GOLD_BUCKET` env vars override the `s3a://` buckets; conftest points them at a temp dir. New table → add a fixture to `bronze_fixtures.py` (the e2e test fails if a bronze table has none).
+Tests (`tests/`): registry/layout (no Spark), `common/` units, DQ rules, DAG structure (skipped without Airflow) and an end-to-end run (`test_pipeline_e2e.py`: tiny Debezium bronze fixtures in `bronze_fixtures.py` → every silver job → `dbt build` of gold → DQ gates) on a local Spark session (real `create_spark_session`) against throwaway Polaris + MinIO containers, with Trino added on demand for dbt (`iceberg_lake.py`, runs `polaris/init.sh`); Spark and Trino share the catalog, nothing is copied. Without Docker, Spark tests use a file-based Iceberg catalog in a temp dir (`ICEBERG_CATALOG_TYPE=hadoop`) and gold tests skip. In a container, set `LAKE_HOST=host.docker.internal`. New table → add a fixture to `bronze_fixtures.py` (the e2e test fails if a bronze table has none).
